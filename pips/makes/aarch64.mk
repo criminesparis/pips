@@ -1,2 +1,2 @@
-CFLAGS	+= -march-native
+CFLAGS	+= -march=native
 
