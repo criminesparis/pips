@@ -1,0 +1,499 @@
+#! /bin/bash
+#
+# $Id$
+#
+# Copyright 1989-2016 MINES ParisTech
+#
+# This file is part of PIPS.
+#
+# PIPS is free software: you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# any later version.
+#
+# PIPS is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.
+#
+# See the GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with PIPS.  If not, see <http://www.gnu.org/licenses/>.
+#
+# TODO
+# - check documentation generation?
+#   I recall that latex errors are ignored in nlpmake.
+#
+
+# usage: $0 [options] email@domain /path/to/prod [/path/to/valid ...]
+# - designed to be run from cron.
+# - check that pips does still compile.
+# - report is sent by mail if the status changed.
+# - run the validation and send a mail on any changes if third arg.
+# - if there is a persistant LOCK, investigate by hand...
+
+# default settings
+exec=
+nice=
+wait=
+tail=
+make=make
+force=
+keepfail=
+report=
+source=
+autoconf=
+parallel=1
+validate=mail-diff-validate
+vopts=
+vname=
+build=compile
+try=3
+run_tpips=1
+lockdir=.
+lockdelay=3600
+stale=
+autoconf_enable=
+
+# get options manually
+# collated one-letter options are *not* handled.
+while [[ $1 == -* ]] ; do
+  case $1 in
+    # how to compile pips
+    -a|--autoconf) autoconf=1 ;;
+    --nlpmake) autoconf= ;;
+    --nlpmake=*) autoconf= ; build=${1#*=} ;;
+    # enable stuff manually
+    --autoconf-enable) autoconf_enable+=" $2" ;;
+    --autoconf-enable=*) autoconf_enable+=" ${1#*=}" ;;
+    # process priority. what about ionice?
+    -n|--nice) nice=nice ;;
+    # force compilation & validation & validation mail
+    -f|--force) validate=mail-validate ; force=1 ;;
+    # force compilation status report even if unchanged (for night validation)
+    -r|--report) report=1 ;;
+    # allow to keep logs on errors
+    -k|--keepfail|--keep-fail) keepfail=1 ;;
+    # lock directory
+    -l|--lock) lockdir=$2 ;;
+    --lock=*) lockdir=${1#*=} ;;
+    # how long to suffer a lock without complaining?
+    -L|--lock-delay) lockdelay=$2 ;;
+    --lock-delay=*) lockdelay=${1#*=} ;;
+    # how long to wait for the lock
+    -w|--wait) wait=1200 ;;
+    --wait=*) wait=${1#*=} ;;
+    # whether to run make in parallel
+    -p|--parallel) parallel=1 ;;
+    -s|--sequential) parallel= ;;
+    # whether to run "tpips --version"
+    -R|--run-tpips) run_tpips=1 ;;
+    --no-run-tpips) run_tpips= ;;
+    # make options for validation (TIMEOUT DO_SLOW...)
+    -V|--validation-option) vopts="$vopts $2" ; shift ;;
+    --validation-option=*) vopts="$vopts ${1#*=}" ;;
+    # trace length to include on compilation error
+    -t|--tail) tail=$2 ; shift ;;
+    --tail=*) tail=${1#*=} ;;
+    # possibly do retry some connections
+    -T|--try) try=$2 ; shift ;;
+    --try=*) try=${1#*=} ;;
+    # compilation & validation name for report
+    -v|--vname) vname=$2 ; shift ;;
+    --vname=*) vname=${1#*=} ;;
+    # file to source for environment setup
+    -S|--source) source=$2; shift ;;
+    --source=*) source=${1#*=} ;;
+    # make command to use for compiling and validating
+    -m|--make) make=$2; shift ;;
+    --make=*) make=${1#*=} ;;
+    # execute on success
+    -e|--exec) exec=$2; shift ;;
+    --exec=*) exec=${1#*=} ;;
+    # this help
+    -h|--help)
+      echo -e \
+        "Usage: $0 [options] em@il /path/to/prod [/path/to/validation ...]\n" \
+        "check pips compilation and validation health\n" \
+        "arguments:\n" \
+        "  em@ail: summary email recipient, defaults to current user\n" \
+        "  /path/to/prod: path to an svn working copy of pips, default is .\n" \
+        "  /path/to/validation: path to an svn working copy of a validation\n" \
+        "available options:\n" \
+        "  -a: compile with autoconf\n" \
+        "  -e exec: execute with eval on success\n" \
+        "  -f: force even if not needed\n" \
+        "  -k: keep failures' output\n" \
+        "  -h: show this help and exit\n" \
+	"  -l dir: lock in this directory\n" \
+	"  -L delay: max lock delay allowed\n" \
+        "  -m make: make command\n" \
+        "  -n: run with nice\n" \
+        "  -p: run in parallel (the default)\n" \
+        "  -r: report compilation result even if not changed\n" \
+        "  -R: run 'tpips --version'\n" \
+        "  -s: do not run in parallel\n" \
+        "  -S file: source file for environment\n" \
+        "  -t len: trace length on compilation error\n" \
+        "  -T n: possibly retry svn up, defaults to thrice\n" \
+        "  -v name: validation name\n" \
+        "  -V opt: validation make option, can be repeated for more\n" \
+        "  -w: wait for lock\n"
+      exit 0
+      ;;
+    *) echo "$0 unexpected option: $1" >&2 ; exit 1 ;;
+  esac
+  shift
+done
+
+# get arguments (destination email & directories)
+dest=${1:-$LOGNAME@cri.mines-paristech.fr}
+prod=${2:-.}
+shift 2
+
+# set full lock path
+LOCK=$lockdir/LOCK
+
+# set default vname with some guessing
+[ "$vname" ] || { vname=${prod%/*} ; vname=${vname##*/} ; }
+[ "$vname" ] || vname=CHECK
+
+arch=$(uname -m)
+
+# remove pips-related environment variables to use default settings
+unset -v EXTERN_ROOT NEWGEN_ROOT LINEAR_ROOT PIPS_ROOT PIPS_ARCH
+
+if [ "$parallel" ] ; then
+  # compute load & jobs depending on the available hardware
+  # note that the reported hardware can be somehow virtual with hyperthreading
+  nproc=$(grep '^processor' /proc/cpuinfo | wc -l)
+  load=$(($nproc - 2))
+  [ $load -lt 1 ] && load=1
+  jobs=$nproc
+  make+=" -j $jobs -l $load --no-print-directory"
+  tail=$((30 + 20 * $nproc))
+else
+  # sequential run
+  tail=50
+fi
+
+# report current-state compile message
+# current-state: ok skip locked KO:*
+# compile: ok unknown unchanged unbuild build exe
+# side effect: the function exits!
+function report()
+{
+  [ $# -eq 3 ] || {
+    # internal error
+    echo "report() got $# args but expecting 3" >> LOG
+    exit 1
+  }
+
+  # get function arguments
+  local current=$1 compile=$2 msg=$3
+  local previous='unknown' prevcomp='unknown'
+  local now=$(date +%Y%m%d%H%M%S)
+
+  # get previous state if available
+  test -f STATE && read previous prevcomp < STATE
+
+  # log report anyway...
+  echo "$now: $current $compile (${COMPILE_SECONDS:-$SECONDS} seconds) $msg" \
+    >> LOG
+
+  # out if locked
+  [ $current = 'locked' ] && {
+    echo "message: $msg" | \
+      mailx -a "Reply-To: $dest" \
+        -s "$vname $arch compilation status is locked" $dest
+    exit 0
+  }
+
+  # out if locked (2)
+  [ $current = 'skip-lock' ] && exit 0
+
+  # no compilation, nothing to report...
+  # however, if there was a *temporary* KO (network down),
+  # it is nice to report that it is up again...
+  [ $current = 'skip' -a $previous != 'KO:svn-up' ] && \
+      { rmdir $LOCK ; exit 0 ; }
+
+  # copy outputs on fail
+  [ "$keepfail" -a $current != 'ok' ] && cp out fail.$now.out
+
+  # no change, no report, unless forced
+  [ ! "$report" -a "$previous" -a $current = "$previous" ] && \
+      { rmdir $LOCK; exit 0; }
+
+  # else generate report
+  {
+    if [ $current = "$previous" ] ; then
+      status_change='is'
+    else
+      status_change='has changed to'
+    fi
+
+    # summary
+    echo $vname $arch compilation status $status_change $current
+
+    # some details
+    echo
+    # hmmm... default compiler is really defined somewhere in "make"
+    echo compiler: $($make -s compiler-version 2> /dev/null)
+    echo previous state: $previous
+    echo previous compile: $prevcomp
+    echo new state: $current
+    echo new compile: $compile
+    echo message: $msg
+    echo run time: ${COMPILE_SECONDS:-$SECONDS}
+    echo full time: $SECONDS
+
+    # host/OS informations
+    echo
+    echo host: $(hostname)
+    type uname > /dev/null && echo os: $(uname -o)
+    type lsb_release > /dev/null && lsb_release -d
+
+    # revisions
+    echo
+    echo version:
+    cat CURRENT
+    [ -f CURRENT_VALID ] && cat CURRENT_VALID
+    echo
+    echo previous:
+    cat PREVIOUS
+    [ -f PREVIOUS_VALID ] && cat PREVIOUS_VALID
+
+    if [ $current != 'ok' ]
+    then
+
+      # show stderr/stdout
+      test -f out && {
+        echo
+        echo out:
+        tail -$tail out
+      }
+
+      # show recent commits
+      echo
+      echo last commits:
+      local repos
+      for repos in pips newgen linear pips/makes
+      do
+        echo $repos:
+        svn log --revision COMMITTED $repos
+      done
+    fi
+  } | mailx -a "Reply-To: $dest" \
+          -s "$vname $arch compilation status is $current" $dest
+
+  # fix compile with previous state on 'unchanged'
+  [ $compile = 'unchanged' ] && compile=$prevcomp
+
+  # hmmm... regenerate previous before network interruption
+  [ $current = 'skip' ] && current=$compile
+
+  # record new state
+  echo $current $compile > STATE
+
+  # good bye! always 0 for cron
+  rmdir $LOCK
+  exit 0
+}
+
+# check working copy & lock directories
+[ -d $prod ] || \
+    report 'KO:no-dir' 'unknown' "working copy directory '$prod' not found"
+[ -d $prod/.svn ] || \
+    report 'KO:no-wc' 'unknown' "'$prod' is not a working copy"
+[ -d $lockdir ] || \
+    report 'KO:lockdir' 'unknown' "lock diretory '$lockdir' not found"
+
+# idem for validation if required
+for valid in "$@" ; do
+  [ -d $valid ] || \
+    report 'KO:no-dir' 'unknown' "working copy directory '$valid' not found"
+  [ -d $valid/.svn ] || \
+    report 'KO:no-wc' 'unknown' "'$valid' is not a working copy"
+done
+
+# environment
+if [ "$source" ] ; then
+  source $source || \
+    report 'KO:source' 'unknown' "cannot 'source $source'"
+fi
+
+cd $prod || \
+    report 'KO:cd-prod' 'unknown' "cannot 'cd $prod'"
+
+# locking based on mkdir
+got_lock=
+if [ "$wait" ] ; then
+  # we DO want to wait for the lock for some time
+  while true ; do
+    mkdir $LOCK > /dev/null 2>&1 && got_lock=1
+    [ "$got_lock" -o $wait -eq 0 ] && break
+    let wait--
+    sleep 1
+  done
+else
+  # just try once
+  mkdir $LOCK > /dev/null 2>&1 && got_lock=1
+fi
+
+if [ ! "$got_lock" ] ; then
+  # warn about locking after some time...
+  created=$(stat -c %Y $LOCK)
+  now=$(date +%s)
+  delay=$(($now - $created))
+  if [ $delay -gt $lockdelay ] ; then
+    touch $LOCK # one warning per lockdelay is enough
+    report 'locked' 'unknown' "working copy '$prod' is locked with $LOCK"
+  else
+    # 'skip-lock' is silent...
+    report 'skip-lock' 'unknown' "working copy '$prod' is locked with $LOCK"
+  fi
+fi
+
+# update working copies (prod & validations)
+rm -f out
+ntry=$try
+while let ntry--
+do
+  if $nice svn up --force --accept theirs-full $prod "$@" >> out 2>&1
+  then
+    # svn up was okay, let us get out
+    ntry=0
+  elif [ $ntry -gt 0 ] ; then
+    # possible repeated failures: network dns svn...
+    # hmmm... try to cleanup after svn up failure
+    # retry loop, let us cleanup and wait a little bit
+    svn cleanup $prod "$@" >> out 2>&1
+    sleep 60
+  else
+    report 'KO:svn-up' 'unchanged' "cannot \"svn up\" ($try)"
+  fi
+done
+
+# source state
+[ -f CURRENT ] || touch CURRENT
+mv CURRENT PREVIOUS
+{
+  # this is local, it should not fail
+  echo pips: $(svnversion -c pips)
+  echo newgen: $(svnversion -c newgen)
+  echo linear: $(svnversion -c linear)
+  echo nlpmake: $(svnversion -c pips/makes)
+} > CURRENT
+
+# validation state
+for valid in "$@" ; do
+  svalid=${valid##*/}
+  [ -f CURRENT_$svalid ] || touch CURRENT_$svalid
+  mv CURRENT_$svalid PREVIOUS_$svalid
+  echo validation: $(svnversion -c $valid) > CURRENT_$svalid
+done
+
+# recompilation, possibly forced
+if [ "$force" ] || ! cmp -s CURRENT PREVIOUS
+then
+  if [ "$autoconf" ]
+  then
+    # AUTOCONF compilation (out: fortran95)
+    [ "$autoconf_enable" ] || autoconf_enable='pyps hpfc gpips'
+    # polylib is assumed to be available somewhere
+    # aggressive cleanup
+    rm -rf ../install
+    # should not be needed???
+    # possible issue: generated makefiles may be broken, so that unbuild
+    # fails and a recompilation is not possible without a manual fix?
+    $nice $make unbuild >> out 2>&1 \
+      || report 'KO:make' 'unbuild' 'cannot "make unbuild"'
+    $nice $make ENABLE="$autoconf_enable" auto >> out 2>&1 \
+      || report 'KO:make' 'auto' 'cannot "make auto"'
+    # check exe, script & lib
+    test -x ../install/bin/tpips \
+      || report 'KO:make' 'executable' 'no "tpips" executable found!'
+    test -x ../install/bin/pips_validation_summary.pl \
+      || report 'KO:make' 'script' 'missing script...'
+    [ "$run_tpips" ] && {
+      timeout 1 ../install/bin/tpips --version >> out 2>&1 \
+	|| report 'KO:make' 'run' 'tpips does not work'
+    }
+    # get python directory, which depends on python version
+    ldpips=$(pkg-config --variable=pythondir pips)/pips
+    test -d "$ldpips" -a -f "$ldpips"/_pypips.so \
+      || report 'KO:make' 'library' 'no "pyps" dynamic library found!'
+  else
+    # NLPMAKE compilation
+    # something may have changed, let us recompile
+    # possible issue: if the Makefile are broken, then unbuild is broken?
+    # for nlpmake it is not a problem because the next svn up should
+    # repare the makefiles.
+    $nice $make unbuild >> out 2>&1 \
+      || report 'KO:make' 'unbuild' 'cannot "make unbuild"'
+    # what about a "timeout"? how to differentiate from a simple failure?
+    $nice $make $build >> out 2>&1 \
+      || report 'KO:make' $build "cannot \"make $build\""
+    # check executable & script
+    tpips=pips/bin/${PIPS_ARCH:-$(./pips/makes/arch.sh)}/tpips
+    test -x $tpips \
+      || report 'KO:make' 'executable' 'no "tpips" executable found!'
+    test -x pips/utils/pips_validation_summary.pl \
+      || report 'KO:make' 'script' 'missing script!'
+    [ "$run_tpips" ] && {
+      # hmmm... could try some 'hello world'?
+      timeout 1 $tpips --version >> out 2>&1 \
+	|| report 'KO:make' 'run' 'tpips does not run'
+    }
+  fi
+
+  # record compilation time, for "report"
+  COMPILE_SECONDS=$SECONDS
+
+  # get there on success, as report exits
+  # should it run after the validation?
+  [ "$exec" ] && {
+    eval "$exec" >> out 2>&1 \
+      || report 'KO:post' 'post-exec' 'post exec failed!'
+  }
+
+  # clean up if no compilation error
+  rm -f out
+
+  # now run the validations with the new tpips
+  for valid in "$@" ; do
+    $nice $make -C $valid $vopts cleaner
+    $nice $make -C $valid $vopts VNAME="$vname $arch" EMAIL=$dest $validate
+    $nice $make -C $valid $vopts cleaner
+  done > out 2>&1
+
+  # the report is delayed so as to keep the lock
+  report 'ok' 'ok' 'pips is fine'
+
+else
+  # no source updates, but maybe a validation update?
+  # first check that pips is fine!
+  read prev comp < STATE
+  [ "$comp" = 'ok' ] || \
+    report 'skip' 'unchanged' "cannot run validation without pips! ($comp)"
+
+  # then run the validation
+  for valid in "$@" ; do
+    svalid=${valid##*/}
+    if ! cmp -s CURRENT_$svalid PREVIOUS_$svalid
+    then
+      # the validation changed, run it with current tpips
+      # run the validation
+      $nice $make -C $valid cleaner
+      $nice $make -C $valid $vopts VNAME="$vname $arch" EMAIL=$dest \
+          mail-diff-validate
+      # cleanup to help next "svn up" run smoothly
+      $nice $make -C $valid cleaner
+    fi
+  done > out 2>&1
+
+  # the report is delayed so as to keep the lock
+  report 'skip' 'unchanged' 'no commit since last check'
+
+fi

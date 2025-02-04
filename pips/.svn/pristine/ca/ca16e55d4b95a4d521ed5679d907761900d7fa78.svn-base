@@ -1,0 +1,31 @@
+# $Id$
+#
+# Debian jessie x86_64
+#
+# CHECK: "on commit" runs on every minute
+#
+* * * * * /home/fabien/CHECK/pips_check_compile --source /home/fabien/CHECK/pipsrc.sh --keepfail --validation-option DO_SLOW= --lock=$HOME --lock-delay=7200 pips-validation@cri.mines-paristech.fr /home/fabien/CHECK/prod /home/fabien/CHECK/validation
+#
+# & force once a day
+#
+7 0 * * * /home/fabien/CHECK/pips_check_compile --wait --force --report --keepfail --source /home/fabien/CHECK/pipsrc.sh --validation-option DO_SLOW= --lock=$HOME --lock-delay=7200 pips-validation@cri.mines-paristech.fr /home/fabien/CHECK/prod /home/fabien/CHECK/validation
+#
+# AUTOC: test autoconf version on every hour
+#
+@hourly /home/fabien/AUTOC/pips_check_compile --autoconf --autoconf-enable='pyps hpfc gpips fortran95' --keepfail --source=/home/fabien/AUTOC/pipsrc.sh --wait --lock=$HOME --lock-delay=7200 pips-validation@cri.mines-paristech.fr /home/fabien/AUTOC/prod /home/fabien/AUTOC/validation
+#
+# & force once a day
+#
+7 1 * * * /home/fabien/AUTOC/pips_check_compile --wait --force --report --autoconf --autoconf-enable='pyps hpfc gpips fortran95' --keepfail --source=/home/fabien/AUTOC/pipsrc.sh --validation-option PIPS_VALIDATION_EXE=1 --lock=$HOME --lock-delay=7200 pips-validation@cri.mines-paristech.fr /home/fabien/AUTOC/prod /home/fabien/AUTOC/validation
+#
+# CROSS: 32bits cross compilation, without validation
+#
+7 2 * * * /home/fabien/CROSS/pips_check_compile --force --report --keepfail --source=/home/fabien/CROSS/pipsrc.sh pips-validation@cri.mines-paristech.fr /home/fabien/CROSS/prod
+#
+# PRIVE: run private validation
+#
+7 3 * * * /home/fabien/PRIVE/pips_check_compile --force --report --keepfail --source /home/fabien/PRIVE/pipsrc.sh pips-private@cri.mines-paristech.fr /home/fabien/PRIVE/prod /home/fabien/PRIVE/private
+#
+# DEB10: debian buster *with* execution
+#
+7 6 * * * /home/fabien/DEB10/pips_check_compile --force --report --keepfail --source /home/fabien/DEB10/pipsrc.sh coelho@cri.mines-paristech.fr /home/fabien/DEB10/prod /home/fabien/DEB10/validation

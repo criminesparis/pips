@@ -1,0 +1,52 @@
+# $Id: Makefile 23384 2017-06-15 08:49:49Z guillou $
+#
+# Copyright 1989-2016 MINES ParisTech
+#
+# This file is part of PIPS.
+#
+# PIPS is free software: you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# any later version.
+#
+# PIPS is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.
+#
+# See the GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with PIPS.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+TARGET	= properties
+
+DERIVED_CFILES = properties.c
+
+LIB_CFILES	= $(DERIVED_CFILES)
+
+INC_TARGET	= $(TARGET).h
+
+LIB_TARGET	= lib$(TARGET).a
+
+# common stuff
+ROOT    = ../../..
+PROJECT = pips
+include $(ROOT)/makes/main.mk
+
+properties.h: properties.c
+
+properties.c: properties.l
+	$(SCAN) --prefix='prop_' `pwd`/$< | $(SCANFIX) | \
+	sed -e '/^FILE \*yyin/s/=[^,;]*//g;' \
+	    -e 's/\(void *\*prop_alloc\)/static \1/;' \
+	    -e 's/\(void *\*prop_realloc\)/static \1/;' \
+	    -e 's/^\(yy_size_t prop_get_\)/static \1/;' \
+	    -e 's/^\(yy_size_t prop_leng\)/static \1/;' \
+	    -e '/ *extern yy_size_t prop_leng.*/d;' \
+	    -e 's/yy_size_t/size_t/g' \
+		 > $@
+
+clean: local-clean
+local-clean:
+	$(RM) $(DERIVED_CFILES)

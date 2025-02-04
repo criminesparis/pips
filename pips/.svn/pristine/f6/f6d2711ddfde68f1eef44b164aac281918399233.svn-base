@@ -1,0 +1,162 @@
+/*
+
+  $Id$
+
+  Copyright 1989-2016 MINES ParisTech
+
+  This file is part of PIPS.
+
+  PIPS is free software: you can redistribute it and/or modify it
+  under the terms of the GNU General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  any later version.
+
+  PIPS is distributed in the hope that it will be useful, but WITHOUT ANY
+  WARRANTY; without even the implied warranty of MERCHANTABILITY or
+  FITNESS FOR A PARTICULAR PURPOSE.
+
+  See the GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License
+  along with PIPS.  If not, see <http://www.gnu.org/licenses/>.
+
+*/
+#ifdef HAVE_CONFIG_H
+    #include "pips_config.h"
+#endif
+ /*
+  * Comparison functions based on perttyprinted strings
+  */
+
+#include <stdio.h>
+#include <string.h>
+#include <ctype.h>
+
+#include "linear.h"
+#include "genC.h"
+#include "misc.h"
+#include "ri.h"
+
+#include "text.h"
+
+#include "ri-util.h"
+
+
+/****************************************************** SAME EXPRESSION NAME */
+
+/* compare two entities for their appearance point of view.
+ * used for putting common in includes.
+ */
+
+bool same_expression_name_p(expression, expression);
+
+bool same_lexpr_name_p(list l1, list l2)
+{
+  if (gen_length(l1)!=gen_length(l2))
+    return false;
+  /* else */
+  for(; l1 && l2; POP(l1), POP(l2))
+    if (!same_expression_name_p(EXPRESSION(CAR(l1)), EXPRESSION(CAR(l2))))
+      return false;
+  return true;
+}
+
+bool same_entity_lname_p(entity e1, entity e2)
+{
+  return same_string_p(entity_local_name(e1), entity_local_name(e2));
+}
+
+bool same_call_name_p(call c1, call c2)
+{
+  return same_entity_lname_p(call_function(c1), call_function(c2)) &&
+    same_lexpr_name_p(call_arguments(c1), call_arguments(c2));
+}
+
+bool same_ref_name_p(reference r1, reference r2)
+{
+  return same_entity_lname_p(reference_variable(r1), reference_variable(r2))
+    && same_lexpr_name_p(reference_indices(r1), reference_indices(r2));
+}
+
+bool same_range_name_p(range r1, range r2)
+{
+  return same_expression_name_p(range_lower(r1), range_lower(r2)) &&
+    same_expression_name_p(range_upper(r1), range_upper(r2)) &&
+    same_expression_name_p(range_increment(r1), range_increment(r2));
+}
+
+bool same_sizeofexpression_name_p(sizeofexpression s0, sizeofexpression s1)
+{
+    if(sizeofexpression_type_p(s0) && sizeofexpression_type_p(s1))
+        return same_type_name_p(sizeofexpression_type(s0),sizeofexpression_type(s1));
+    if(sizeofexpression_expression_p(s0) && sizeofexpression_expression_p(s1))
+        return same_expression_name_p(sizeofexpression_expression(s0),sizeofexpression_expression(s1));
+    return false;
+}
+
+bool same_subscript_name_p(subscript ss1, subscript ss2)
+{
+  return same_expression_name_p(subscript_array(ss1), subscript_array(ss2)) 
+     && same_lexpr_name_p(subscript_indices(ss1), subscript_indices(ss2));
+}
+
+bool same_cast_name_p(cast cs1, cast cs2)
+{
+  return same_type_name_p(cast_type(cs1), cast_type(cs2)) &&
+    same_expression_name_p(cast_expression(cs1), cast_expression(cs2)) ;
+}
+
+bool same_application_name_p(application a1, application a2)
+{
+  return  same_expression_name_p(application_function(a1), application_function(a2)) &&
+   same_lexpr_name_p(application_arguments(a1), application_arguments(a2));
+}
+
+bool same_va_arg_name_p(list l1, list l2)
+{
+  if (gen_length(l1)!=gen_length(l2))
+    return false;
+
+  for(; l1 && l2; POP(l1), POP(l2)) {
+    sizeofexpression s1 = SIZEOFEXPRESSION(CAR(l1));
+    sizeofexpression s2 = SIZEOFEXPRESSION(CAR(l2));
+    if (!same_sizeofexpression_name_p(s1, s2))
+      return false;
+  }
+  return true;
+}
+
+
+bool same_syntax_name_p(syntax s1, syntax s2)
+{
+  if (syntax_tag(s1)!=syntax_tag(s2))
+    return false;
+  /* else */
+  switch (syntax_tag(s1))
+    {
+    case is_syntax_call:
+      return same_call_name_p(syntax_call(s1), syntax_call(s2));
+    case is_syntax_reference:
+      return same_ref_name_p(syntax_reference(s1), syntax_reference(s2));
+    case is_syntax_range:
+      return same_range_name_p(syntax_range(s1), syntax_range(s2));
+    case is_syntax_sizeofexpression:
+      return same_sizeofexpression_name_p(syntax_sizeofexpression(s1),syntax_sizeofexpression(s2));
+    case is_syntax_subscript:
+      return same_subscript_name_p(syntax_subscript(s1), syntax_subscript(s2));
+    case is_syntax_cast:
+      return same_cast_name_p(syntax_cast(s1), syntax_cast(s2));
+    case is_syntax_application:
+      return same_application_name_p(syntax_application(s1), syntax_application(s2));
+    case is_syntax_va_arg:
+      return same_va_arg_name_p(syntax_va_arg(s1), syntax_va_arg(s2));
+    default:
+      pips_internal_error("unexpected syntax tag: %d", syntax_tag(s1));
+    }
+  return false;
+}
+
+bool same_expression_name_p(expression e1, expression e2)
+{
+  return same_syntax_name_p(expression_syntax(e1), expression_syntax(e2));
+}

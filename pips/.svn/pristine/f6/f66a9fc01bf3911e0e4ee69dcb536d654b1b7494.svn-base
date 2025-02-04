@@ -1,0 +1,56 @@
+#
+# $Id$
+#
+# Ubuntu 16.04 Xenial x86_64 on PAU
+#
+# autoconf force once a day
+#
+7 1 * * * /home/fabien/AUTOP/pips_check_compile --wait --force --report --autoconf --keepfail --source=/home/fabien/AUTOP/pipsrc.sh --validation-option PIPS_VALIDATION_EXE=1 pips-validation@cri.mines-paristech.fr /home/fabien/AUTOP/prod /home/fabien/AUTOP/validation
+#
+# and try once an hour
+#
+37 * * * * /home/fabien/AUTOP/pips_check_compile --autoconf --keepfail --source=/home/fabien/AUTOP/pipsrc.sh --validation-option PIPS_VALIDATION_EXE=1 pips-validation@cri.mines-paristech.fr /home/fabien/AUTOP/prod /home/fabien/AUTOP/validation
+#
+# clang once a day
+#
+7 2 * * * /home/fabien/CLANG/pips_check_compile --wait --force --report --keepfail --source=/home/fabien/CLANG/pipsrc.sh pips-validation@cri.mines-paristech.fr /home/fabien/CLANG/prod /home/fabien/CLANG/validation
+#
+# clang trunk
+#
+37 2 * * * /home/fabien/CLGTK/pips_check_compile --wait --force --report --keepfail --source=/home/fabien/CLGTK/pipsrc.sh pips-validation@cri.mines-paristech.fr /home/fabien/CLGTK/prod /home/fabien/CLGTK/validation
+#
+# gcc8x once a day
+#
+7 4 * * * /home/fabien/GCC8X/pips_check_compile --wait --force --report --keepfail --source=/home/fabien/GCC8X/pipsrc.sh pips-validation@cri.mines-paristech.fr /home/fabien/GCC8X/prod /home/fabien/GCC8X/validation
+#
+# gcc9x once a day
+#
+37 4 * * * /home/fabien/GCC9X/pips_check_compile --wait --force --report --keepfail --source=/home/fabien/GCC9X/pipsrc.sh pips-validation@cri.mines-paristech.fr /home/fabien/GCC9X/prod /home/fabien/GCC9X/validation
+#
+# gcc10 once a day
+#
+7 5 * * * /home/fabien/GCC10/pips_check_compile --wait --force --report --keepfail --source=/home/fabien/GCC10/pipsrc.sh pips-validation@cri.mines-paristech.fr /home/fabien/GCC10/prod /home/fabien/GCC10/validation
+#
+# gcctk once a day
+#
+37 5 * * * /home/fabien/GCCTK/pips_check_compile --wait --force --report --keepfail --source=/home/fabien/GCCTK/pipsrc.sh pips-validation@cri.mines-paristech.fr /home/fabien/GCCTK/prod /home/fabien/GCCTK/validation
+#
+# spear/cmini/fmini once an hour + force once a day
+#
+5 4 * * * /home/fabien/SPEAR/pips_check_compile --wait --force --report --keepfail --source=/home/fabien/SPEAR/pipsrc.sh --validation-option TARGET=Spear pips-validation@cri.mines-paristech.fr /home/fabien/SPEAR/prod /home/fabien/SPEAR/pipspriv
+15 4 * * * /home/fabien/CMINI/pips_check_compile --wait --force --report --keepfail --source=/home/fabien/CMINI/pipsrc.sh --validation-option TARGET=Cmini pips-validation@cri.mines-paristech.fr /home/fabien/CMINI/prod /home/fabien/CMINI/validation
+25 4 * * * /home/fabien/FMINI/pips_check_compile --wait --force --report --keepfail --source=/home/fabien/FMINI/pipsrc.sh --validation-option TARGET=Fmini pips-validation@cri.mines-paristech.fr /home/fabien/FMINI/prod /home/fabien/FMINI/validation
+#
+35 * * * * /home/fabien/SPEAR/pips_check_compile --keepfail --source=/home/fabien/SPEAR/pipsrc.sh --validation-option TARGET=Spear pips-validation@cri.mines-paristech.fr /home/fabien/SPEAR/prod /home/fabien/SPEAR/pipspriv
+45 * * * * /home/fabien/CMINI/pips_check_compile --keepfail --source=/home/fabien/CMINI/pipsrc.sh --validation-option TARGET=Cmini pips-validation@cri.mines-paristech.fr /home/fabien/CMINI/prod /home/fabien/CMINI/validation
+55 * * * * /home/fabien/FMINI/pips_check_compile --keepfail --source=/home/fabien/FMINI/pipsrc.sh --validation-option TARGET=Fmini pips-validation@cri.mines-paristech.fr /home/fabien/FMINI/prod /home/fabien/FMINI/validation
+#
+# on commit check on pau, test every minute and force once a day
+#
+* * * * * /home/fabien/PAUCK/pips_check_compile --source /home/fabien/PAUCK/pipsrc.sh --keepfail --validation-option DO_SLOW= pips-validation@cri.mines-paristech.fr /home/fabien/PAUCK/prod /home/fabien/PAUCK/validation
+7 0 * * * /home/fabien/PAUCK/pips_check_compile --wait --force --report --source /home/fabien/PAUCK/pipsrc.sh --keepfail --validation-option DO_SLOW= pips-validation@cri.mines-paristech.fr /home/fabien/PAUCK/prod /home/fabien/PAUCK/validation
+#
+# Python 2 & 3
+#
+7 7 * * * /home/fabien/PYPS2/pips_check_compile --wait --force --report --source /home/fabien/PYPS2/pipsrc.sh --keepfail --validation-option 'PYTHON=python2 DO_TEST= DO_TPIPS=' pips-validation@cri.mines-paristech.fr /home/fabien/PYPS2/prod /home/fabien/PYPS2/validation
+37 7 * * * /home/fabien/PYPS3/pips_check_compile --wait --force --report --source /home/fabien/PYPS3/pipsrc.sh --keepfail --validation-option 'PYTHON=python3 DO_TEST= DO_TPIPS=' pips-validation@cri.mines-paristech.fr /home/fabien/PYPS3/prod /home/fabien/PYPS3/validation

@@ -1,0 +1,427 @@
+\documentclass[a4paper]{article}
+
+% lang
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+
+% others
+\usepackage{hyperref}
+\usepackage{color}
+\definecolor{freeblue}{rgb}{0.25,0.41,0.88}
+\definecolor{thingray}{rgb}{0.9,0.9,0.95}
+
+\usepackage{listings}
+
+\lstset{basicstyle=\ttfamily\small,keywordstyle=\bfseries,stringstyle=\it\color{blue},commentstyle=\color{blue},breaklines=true,language=c,moredelim=[is][\bfseries\color{blue}]{!}{!},
+framerule=2mm,framexleftmargin=5mm, frame=leftline, rulecolor=\color{freeblue}, breaklines=true, backgroundcolor=\color{thingray}
+}
+
+% For the smileys :-)
+\usepackage{wasysym}
+
+\makeatletter
+
+% Test for a TeX4ht command:
+\@ifundefined{HCode}{%
+  % We are generating PDF, so allow to break down URL which is nicer
+  % instead of ugly line overflows:
+  \usepackage{breakurl}}{%
+  % else we are generating HTML with TeX4ht, use plain url:
+  \usepackage{url}}
+
+\usepackage{acronym,xspace}
+
+%%\usepackage{tikz}
+
+\newcommand{\PIPS}{\textbf{\texttt{PIPS}}}
+\newcommand{\autoconf}{\texttt{autoconf}}
+\newcommand{\automake}{\texttt{automake}}
+\newcommand{\gnulib}{\texttt{gnulib}}
+%% latex issues on vivid
+%%\newcommand{\file}[1]{\fileicon{}\texttt{#1}}
+%%\newcommand{\dir}[1]{\diricon\texttt{#1}}
+\newcommand{\file}[1]{\texttt{#1}}
+\newcommand{\dir}[1]{\texttt{#1}}
+\newcommand{\cmd}[1]{\textbf{`}\texttt{#1}\textbf{`}}
+
+\newcommand{\PipsDevGuidePDF}{\url{http://www.cri.ensmp.fr/pips/developer_guide.htdoc/developer_guide.pdf}\xspace}
+\newcommand{\PipsDevGuideHTDOC}{\url{http://www.cri.ensmp.fr/pips/developer_guide.htdoc}\xspace}
+\newcommand{\PipsAutotoolsGuidePDF}{\url{http://www.cri.ensmp.fr/pips/auto_pips.htdoc/auto_pips.pdf}\xspace}
+\newcommand{\PipsAutotoolsGuideHTDOC}{\url{http://www.cri.ensmp.fr/pips/auto_pips.htdoc}\xspace}
+
+\title{Autotools for \PIPS{}}
+
+\author{Serge \textsc{Guelton}}
+
+% document
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This document describes the new build infrastructure of \PIPS{},
+ based on the famous \texttt{autotools} suite and completes the \PIPS{}
+ developer guide.
+
+It describes
+\begin{itemize}
+\item the meaning of each involved file~\ref{sec:structure};
+\item the installation process~\ref{sec:install} for \PIPS{} users and developers.
+\item the maintenance processes~\ref{sec:maintain} for \PIPS{} developers;
+\end{itemize}
+
+This new infrastructure allows better portability and quite faster
+(re)compiling taking full advantage from some caching and multicore
+processors.
+\end{abstract}
+
+You can get a printable version of this document on\\
+\PipsAutotoolsGuidePDF{} and a HTML version on \PipsAutotoolsGuideHTDOC
+
+%%%
+\section{Introduction}
+
+Building a large software like \PIPS{} is quite complicated:
+\begin{enumerate}
+\item several source languages;
+\item many tools involved;
+\item unusual automatic header file generations.
+\end{enumerate}
+
+If you want to ensure a good level of portability,
+you have to rely on portable tools.
+
+If you want to ensure a good level of maintainability,
+you have to rely on external, asserted tools.
+
+As \PIPS{} targets \texttt{*nix} based systems and is written mainly in \texttt{C},
+\texttt{autotools} appear as a \emph{de facto} standard.
+It is especially known for enforcing good portability between \texttt{MacOs}, \texttt{Linux} and \texttt{BSD}.
+Through \autoconf{}, it separate configuration step from build step.
+Through \gnulib{}, it ensures portability of non-standard \texttt{C} functions.
+
+As of now, \PIPS{} compiles on  \texttt{Linux}, \texttt{BSD} and \texttt{MacOs} Operating Systems.
+It can be compiled using either \texttt{gcc} or \texttt{icc}.
+
+You should notice that indeed \PIPS{} has currently 2 different build
+process that lives in parallel\footnote{Of course it is logical for a
+  parallelizer to have 2 build infrastructures that can be used
+  indifferently in parallel! \smiley{} It is also useful for
+  fault-tolerance.}, the \texttt{GNU-make}-based traditional infrastructure
+and this new one based on \texttt{autotools}. In this way we can develop
+and improve the new build infrastructure without hurting traditional
+users.
+
+Besides better portability support, the \texttt{autotools}-based build
+infrastructure is quite faster that the old one and can exploit available
+multiprocessors for example on \texttt{GNU-make} when using the
+\texttt{--jobs=...} option to specify the number of \texttt{make} process
+to use.
+
+The nasty side effect of having 2 build methods is that, when adding new
+stuff in \PIPS{}, you should declare them in both build infrastructures to
+avoid having different contents in \PIPS{} according to the build
+infrastructure used. So refer to the companion of this guide too, the
+\PIPS{} Developer Guide \PipsDevGuidePDF or \PipsDevGuideHTDOC.
+
+%%%
+\section{Prerequisites}
+
+In this section, we shortly list all packages needed to use auto-pips.
+Note that those packages are only needed for developers, not for users:
+\begin{itemize}
+\item \texttt{autoconf}
+\item \texttt{automake}
+\item \texttt{libtool}
+\item \texttt{pkg-config}
+\end{itemize}
+
+%%%
+\section{Infrastructure Organization}
+\label{sec:structure}
+
+In this section, we describe the configuration files used by the several tools involved in \PIPS{} build process.
+
+\subsection{\autoconf{}}
+
+\autoconf{} manages the configuration of the build process.
+Involved files are
+\begin{description}
+\item[\file{configure.ac}:] central place for configuration. Running \cmd{autoreconf -vi} will produce a \file{configure} script from it.
+\item[\dir{makes/m4}:] auxiliary directory where \texttt{m4} configuration macros are stored. It is read by \cmd{autoreconf}.
+\item[\file{Makefile.am}:] top-level \file{Makefile.am} contains a macro variable definition \texttt{ACLOCAL\_AMFLAGS} where \cmd{autoreconf} will find its additional \texttt{m4} sources.
+Running \cmd{autoreconf -vi} will produce a \file{Makefile.in} for each \file{Makefile.am}
+\item[\file{configure}:] is the portable configuration script generated by \cmd{autoreconf}. Running it will turn each \file{Makefile.in} into a regular \file{Makefile}.
+\item[\file{config.status}:] is a script generated by configuration step,
+  that memorizes configuration parameters.
+\end{description}
+
+For in-depth documentation of \autoconf{}, feel free to read \url{http://www.gnu.org/software/autoconf/manual}.
+
+\subsection{\automake{}}
+
+\automake{} manages the set of makefiles involved in the build process.
+
+Each \file{Makefile.am} in source repository describes the build process for this repository.
+It follows the \cmd{make} syntax, without needing \texttt{GNU-make} extensions for the sake of portability.
+
+For in-depth documentation of \automake{}, feel free to read \url{http://www.gnu.org/software/automake/manual}.
+
+\subsection{\gnulib{}}
+
+\gnulib{} manages portability of \texttt{C} functions across \texttt{*nix} flavors.
+Its whole configuration is stored in \dir{src/Libs/gnulib} and \dir{src/Libs/gnulib/m4}.
+A few lines have been added in \file{configure.ac} to manage \gnulib{} configuration.
+
+For in-depth documentation of \gnulib{}, feel free to read \url{http://www.gnu.org/software/gnulib/manual}.
+
+%%%
+\section{Installation Processes}
+\label{sec:install}
+
+An automated script does all the nasty things for you if you want to
+install a \emph{production} version, that is to say copies of Linear, Newgen
+and Pips trunks. Just begin by typing the following lines in the
+directory where you want your production version to be installed (for
+instance \lstinline|~/Pips4u/prod|)
+\begin{lstlisting}
+wget http://ridee.enstb.org/pips/get-pips4u.sh
+chmod u+x get-pips4u.sh
+./get-pips4u.sh --help
+\end{lstlisting}
+The last command displays all the options available for
+get-pips4u.sh. In particular, check the default value for the
+\texttt{--prefix} command (\lstinline|~/pips4u-0.1|). This is the
+directory where the libraries and executables are installed. If you
+also want to work on development branches (strongly recommended), this
+may not be convenient as you may want to have several versions
+available at the same time. For that purpose, you can specify another
+installation directory with:
+\begin{lstlisting}
+./get-pips4u.sh --devel --prefix ~/Pips4u/prod/auto-root
+\end{lstlisting}
+or whatever location pleases you. Launching this script does (almost)
+everything for you, from checking out \PIPS{} sources to compiling and
+installing the libraries and executables.
+
+After installation, if you want to activate some extra \PIPS{} modules
+such as \texttt{hpfc} or \texttt{pyps} for instance, you can invoke:
+\begin{lstlisting}
+cd ~/Pips4u/prod/pips4u-0.1/src/pips-0.1/_build
+./config.status -V
+\end{lstlisting}
+The last commant gives you the options previously used for the
+configure. Then, from the very same directory execute:
+\begin{lstlisting}
+../configure ...the same options... --enable-hpfc --enable-pyps
+\end{lstlisting}
+If you want to be able to run the validation, use the
+\lstinline|--enable-devel-mode| option. Beware that it also sets the
+compilation flags to \lstinline|-Wall -Werror -O0|.
+After all this you have to recompile and install by typing
+\begin{lstlisting}
+make; make install
+\end{lstlisting}
+in the \lstinline|_build| directory.
+
+Now, you may also want a \emph{development} branch. This is not automated,
+and you have to do it by yourself. Here are some guidelines to achieve
+this.
+
+First get your development area from svn (in \lstinline|~/Pips4u/dev|
+for instance), and create a development branch:
+\begin{lstlisting}
+svn co http://svn.cri.ensmp.fr/svn/pips/branches/luther dev
+cd dev
+svn cp http://svn.cri.ensmp.fr/svn/pips/trunk my-branch-name
+svn commit my-branch-name
+cd my-branch-name
+\end{lstlisting}
+Then you have to get the \lstinline|PATH|, \lstinline|PKG_CONFIG_PATH|
+and \lstinline|LD_LIBRARY_PATH| values used for the configure
+in your production building directory:
+\begin{lstlisting}
+pushd  ~/Pips4u/prod/pips4u-0.1/src/pips-0.1/_build
+./config.status -V
+popd
+\end{lstlisting}
+And perform the configure:
+\begin{lstlisting}
+autoreconf -vi
+mkdif _build
+cd _build
+../configure --disable-static --prefix=~/Pips4u/dev/my-branch-name/auto-root PATH=... PKG_CONFIG_PATH=... LD_LIBRAY_PATH=... --enable-devel-mode
+\end{lstlisting}
+where the ... stand for the values retrieved from the production
+environment, and where you can add whatever --enable options you want.
+
+At last, don't forget to compile and then install in you development
+installation directory (here
+\lstinline|~/Pips4u/dev/my-branch-name/auto-root|).
+
+In some cases, \PIPS{} may be included in another distribution and you may
+build \PIPS{} differently. For example in Par4All, where only this
+\texttt{autotools} build method is used, this is done by the Par4All
+installation process and you do not need to care about the previous
+installation script.
+
+%%%
+\section{Maintenance Processes}
+\label{sec:maintain}
+
+This section describes the process to follow when changing build infrastructure.
+
+\subsection{Adding a \texttt{C} source file in an existing \PIPS{} library}
+
+Let us assume you want to add the file \file{pips.c} into library \dir{src/Libs/ri-util}.
+First make sure your source file includes pips configuration header, by adding 
+
+\begin{lstlisting}
+#ifdef HAVE_CONFIG_H
+    #include "pips_config.h"
+#endif
+\end{lstlisting}
+
+at the top of your source file, before any other include.
+
+
+The only thing you have to do then is to add your file in the macro variable suffixed \texttt{\_SOURCES}
+in \file{src/Libs/ri-util/Makefile.am}
+That is
+\begin{lstlisting}
+libri_util_la_SOURCES=eval.c  ... size.c
+\end{lstlisting}
+Becomes
+\begin{lstlisting}
+libri_util_la_SOURCES=eval.c  ... size.c !pips.c!
+\end{lstlisting}
+
+\subsection{Adding a \texttt{C} header file in an existing \PIPS{} library}
+
+Let us assume you want to add the file \file{pips.h} into library \dir{src/Libs/ri-util}.
+You will have to modify \file{src/Libs/ri-util/Makefile.am}
+Ask yourself the question: Do I want to install the header file with the distribution ?
+\begin{itemize}
+\item If the answer is yes, add your file to the \texttt{include\_HEADERS} macro variable in, or create it if it does not exist.
+\item If the answer is no, add your file to the \texttt{dist\_noinst\_HEADERS}  macro variable, or create it if it does not exist.
+\end{itemize}
+That is write something like this
+\begin{lstlisting}
+include_HEADERS=!pips.h!
+\end{lstlisting}
+
+\automake{} provides a fine grain control over what gets installed and distributed.
+
+
+\subsection{Adding a \TeX{} file in an existing \PIPS{} directory}
+Let us assume you want to add the file \file{pips.tex} into library \dir{src/Libs/ri-util}.
+You will have to modify \file{src/Libs/ri-util/Makefile.am}
+
+First, beware that documentation is not built by default.
+It is only built when user activates configure flags \texttt{--enable-doc}.
+
+So everything you do in a makefile that is relevant to documentation must be guarded by \texttt{WITH\_DOC}
+The \automake{} variable for documentation is \texttt{dist\_noinst\_DATA} for sources and \texttt{doc\_DATA} for output.
+That is
+\begin{lstlisting}
+if !WITH_DOC!
+dist_noinst_DATA=!pips.tex!
+doc_DATA=!pips.pdf!
+endif
+\end{lstlisting}
+
+In addition to this, you have to supply \automake{} rules to build
+\textsc{pdf} from \TeX{} files, using the directive
+\begin{lstlisting}
+include $(top_srcdir)/makes/latex.mk
+\end{lstlisting}
+if it is not already there.
+
+
+\subsection{Adding a library}
+
+This one is a bit more difficult.
+In the following, we assume you want to add \dir{mylib} into \dir{src/Libs}.
+
+There are many steps involved, follow them carefully:
+\begin{enumerate}
+\item create a directory \dir{mylib} into \dir{src/Libs};
+\item add \texttt{mylib} to the \texttt{PIPS\_SUBDIRS} macro variable in \file{src/Libs/Makefile.am};
+\item add \texttt{mylib/libmylib.la} to the \texttt{libpipslibs\_la\_LIBADD} macro variable  in \file{src/Libs/Makefile.am};
+\item add following template in \file{src/Libs/mylib/Makefile.am}
+\begin{lstlisting}
+TARGET  = !mylib!
+include_HEADERS = $(TARGET).h
+BUILT_SOURCES=$(TARGET).h
+include $(top_srcdir)/makes/cproto.mk
+noinst_LTLIBRARIES=lib!mylib!.la
+lib_!mylib!_la_SOURCES= !src0.c src1.c ... srcn.c!
+
+include $(srcdir)/../pipslibs_includes.mk
+\end{lstlisting}
+Where
+\begin{description}
+\item[\texttt{TARGET}] is used to avoid redundancy and to communicate with \file{cproto.mk}.
+\item[\texttt{include\_HEADERS}] specifies that you want to distribute the header generated by \cmd{cproto}.
+\item[\texttt{BUILT\_SOURCES}] specifies that  \cmd{cproto} generated header must be built before anything else.
+\item[\texttt{include \$(top\_srcdir)/makes/cproto.mk}] specifies how to use \cmd{cproto}.
+\item[\texttt{noinst\_LTLIBRARIES}] specifies the name of local libraries.
+\item[\texttt{lib\_mylib\_la\_SOURCES}] specifies the sources of your library.
+\item[\texttt{include \$(srcdir)/../pipslibs\_includes.mk}] sets preprocessor include path correctly.
+\end{description}
+
+\item add \texttt{src/Libs/mylib/Makefile} to the \texttt{AC\_CONFIG\_FILES(...)} macro function parameters in \file{configure.ac};
+\end{enumerate}
+
+\subsection{Adding a program check}
+
+For uncommon build, one may need to depend on an extra program.
+Then comes the distribution issue: how can we assert the program is installed on user/developers machines ?
+First you have to ask yourself: Is the new feature that depends on this program critical or not ?
+If not, you will add an optional dependency.
+Otherwise it is a mandatory dependency.
+
+You will basically add your check by filling a call to macro function \texttt{AX\_CHECK\_PROG(\textit{prog\_name})}
+in \file{configure.ac}.
+This will perform the check for the program, trying to find it in current \texttt{\$PATH} or
+in env variable \texttt{\$\{\textit{PROG\_NAME}\}}.
+
+The macro variable \texttt{\$(\textit{PROG\_NAME})} will be available in your \file{Makefile.am}.
+
+The last step is to attach the result of the check to a dependency.
+That way, the configure will fail or not depending on the result of the check.
+To do so, you will use the macro function \texttt{AX\_DEPENDS(\textit{feature},\textit{list-of-dependencies})}.
+If you have a mandatory dependency, add the name of the program to the 
+\lstinline|AX_DEPENDS([minimum],[...])| line.
+Otherwise, add it to the optional \texttt{AX\_DEPENDS(...)} of your choice.
+To fully understand usage of \texttt{AX\_DEPENDS(...)}, please read section on passes\ref{sec:passes}.
+
+\subsection{Adding a pass}
+\label{sec:passes}
+2bedone
+
+
+%%%
+\section{Additional Checks}
+\label{sec:check}
+
+\automake{} generates a \texttt{check} rule for \cmd{make}, but this rule is not used (yet).
+Instead you can try one of the following, at the top of your build directory:
+\begin{itemize}
+\item \cmd{make check-includes}: checks if a source file does not include useless pips headers.
+It is based on the \cmd{pipslibsdeps.py} script which has some extra features, try \cmd{pipslibsdeps.py --help} !
+\item \cmd{make check-properties}: check if a property is defined in \file{pipsmake-rc.tex} but never referenced;
+\item \cmd{make inspect-symbols}: checks exported but unused symbols for each pips library.
+\end{itemize}
+
+%%%
+\begin{acronym}
+\end{acronym}
+
+\end{document}
+
+%%% Local Variables:
+%%% mode: latex
+%%% ispell-local-dictionary: "american"
+%%% End:
+

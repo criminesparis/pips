@@ -1,0 +1,210 @@
+#
+# $Id$
+#
+# Copyright 1989-2016 MINES ParisTech
+#
+# This file is part of PIPS.
+#
+# PIPS is free software: you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# any later version.
+#
+# PIPS is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.
+#
+# See the GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with PIPS.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+# common stuff
+ROOT    = ../../..
+
+include $(ROOT)/makes/config.mk
+include $(ROOT)/makes/has_swig.mk
+
+TARGET	= pypips
+
+CPPFLAGS	+= $(shell $(PYTHON_CONFIG) --cflags)
+#PYPS_STDOUT	= pypsout
+P2PY	= ./pipsmakerc2python.py
+
+# FIXME
+ifndef IPYTHON
+IPYTHON = i$(PYTHON)
+endif
+
+# what is really useful?
+DERIVED.py	= $(TARGET).py  pypsconfig.py pipscc pyps.py setup.py
+SRC.py	= pypsbase.py pypsex.py pii.py pipsgcc.py \
+	pypsutils.py pyrops.py apypips.py pipscc.py six.py \
+	$(shell find drivers -name '*.py' -print)
+
+#BIN_TARGET	= pipscc
+
+# pips with interactive python
+INSTALL_EXE	= ipyps pipscc
+
+LIB_TARGET	= _$(TARGET).a
+DERIVED_CFILES	= $(TARGET)_wrap.c
+LIB_CFILES	= $(TARGET).c $(DERIVED_CFILES)
+
+# python version
+PYVERS	= $(shell $(PYTHON) -c "import platform as p;print('.'.join(p.python_version_tuple()[0:2]))")
+
+# add to PYTHONPATH...
+PYLIB.d	= $(INSTALL_DIR)/lib/python/$(PYVERS)/pips
+LIB.d	= $(PYLIB.d)
+
+LDFLAGS	+= -L$(LIB.d) -L$(LIB.d)/$(ARCH)
+DYNLDFLAGS = $(addprefix -l, $(pips.libs)) $(shell $(PYTHON_CONFIG) --ldflags)
+
+# must be consistent with "pipsconfig.py" below
+INSTALL_RTM	= \
+	impl/Makefile.base impl/pipsdef.h \
+	drivers/workspace_gettime/pyps_gettime.c \
+	drivers/workspace_gettime/pyps_gettime.h
+
+PROJECT = pips
+include $(ROOT)/makes/main.mk
+
+# install pyps runtime in a specific subdirectory
+RTM.d := $(SHR.d)/pyps
+
+# deal with warning in the swig generated code
+$(ARCH)/$(TARGET)_wrap.o: COPT += -Wno-error=clobbered
+
+INSTALL_PYLIB	= $(DERIVED.py) $(SRC.py) \
+	$(ARCH)/$(LIB_TARGET) $(ARCH)/$(LIB_TARGET:%.a=%.so)
+
+# install hook for python stuff
+# redo INSTALL_PY stuff here so as not to change rules used by am
+install: pyps-install
+pyps-install: .build_py
+.build_py: $(INSTALL_PYLIB)
+	$(INSTALL) -d $(PYLIB.d)
+	$(INSTALL) -m 644 $(INSTALL_PYLIB) $(PYLIB.d)/
+	touch $@
+
+phase5: pyps-install
+
+# fixme: $(PROTOIZE) does not always work...
+#  echo '/* hmmm... manual fixes? */' ;
+#  echo 'extern char * pyps_last_error;' ;
+#  echo 'extern void atinit(void);' ;
+CPROTO.inc = \
+		-I. \
+        -I$(ROOT)/include \
+        -I$(NEWGEN_ROOT)/include \
+        -I$(LINEAR_ROOT)/include \
+        -I$(PIPS_ROOT)/include \
+        -I$(EXTERN_ROOT)/include \
+	$(shell $(PYTHON_CONFIG) --includes)
+
+pypips-inc.h: pypips.c pypips.h.in
+	{ \
+	  echo '/* "$@" is AUTOMATICALLY generated, do not edit! */' ; \
+	  cat pypips.h.in ; \
+	  $(PROTO) $(PRFLAGS) $(CPROTO.inc) -DCPROTO_IS_PROTOTYPING pypips.c \
+	    || exit $$? ; \
+	  echo '/* "$@" done. */' ; \
+	} > $@
+	test "$$(wc -l < $@)" -gt 50
+
+$(TARGET).i: $(TARGET).i.in pypips-inc.h
+	sed -e 's/SWIG_MODULE_NAME/$(TARGET)/' $^ > $@
+
+pypips_wrap.c : pypips.i pypips-inc.h
+	$(SWIG) -python -o pypips_wrap.tmp pypips.i
+	cat pypips-inc.h pypips_wrap.tmp > $@
+	$(RM) pypips_wrap.tmp
+
+pypsconfig.py: pypsconfig.py.in
+	{ \
+	  cat pypsconfig.py.in ; \
+	  echo "pypsruntime = PypsRuntimeDir('$$PWD/$(RTM.d)')"; \
+	  echo "pypsversion = 'mk-$(shell date +%Y%m%d%H%M%S.%N)-$(shell svnversion $(ROOT))'" ; \
+	} > $@
+
+$(TARGET).py: $(TARGET).i
+	swig -python $<
+
+# FIXME
+ipyps: ipyps.in
+	sed -e 's,@PYTHON@,/usr/bin/env $(IPYTHON),' $< > $@
+	chmod a+rx $@
+
+clean:
+	$(RM) *.o *.tmp *.H
+	$(RM) .build_py the_$(TARGET)_wrap.c $(TARGET)_wrap.c \
+	  *.pyc pypips-inc.h pypips.i setup.py pypips.py ipyps $(DERIVED.py)
+	$(RM) -r build
+
+distclean: clean
+	$(RM) $(TARGET).py _$(TARGET).so pyps.py *.i
+
+# what is the point?
+pipscc: pipscc.py
+	cp $< $@
+	chmod u+x $@
+
+check: sample.py all pipscc.py pii.py
+	PYTHONPATH=$(PY.d) $(PYTHON) -c "import pypips"
+	PYTHONPATH=$(PY.d) $(PYTHON) -c "import pyps"
+	PYTHONPATH=$(PY.d) $(PYTHON) -c "import pipscc"
+	PYTHONPATH=$(PY.d) $(PYTHON) -c "import pii"
+	PYTHONPATH=$(PY.d) PAGER=cat ./$<
+	PYTHONPATH=$(PY.d) PAGER=cat ./test.py
+	PYTHONPATH=$(PY.d) PAGER=cat ./test2.py
+	PYTHONPATH=$(PY.d) ./pipscc -c test.c
+	PYTHONPATH=$(PY.d) PAGER=cat ./pipscc test.o -o thetest
+	rm -f thetest test.o
+	PYTHONPATH=$(PY.d) $(PYTHON) pii.py -c test.c
+	PYTHONPATH=$(PY.d) PAGER=cat $(PYTHON) pii.py test.o -o thetest
+
+checkall: xpc.py
+	PYTHONPATH=$(PY.d) $(PYTHON) ./xpc.py --module=foo --sources=carto.c,get.c --algo=genetic --nbgen=2 --CPPFLAGS=-DSIZE=100
+
+
+# generate stuff from various sources...
+p2p = $(PYTHON) $(P2PY) ../../Documentation/pipsmake/pipsmake-rc.tex \
+		$(ETC.d)/properties.rc $(ETC.d)/pipsdep.rc
+
+pyps.py:
+	{ \
+	  echo '# -*- coding: utf-8 -*-' ; \
+	  echo "from pypsbase import *" ; \
+	  $(p2p) -loop ; \
+	  $(p2p) -module ; \
+	  $(p2p) -modules ; \
+	  $(p2p) -properties ; \
+	} > pyps.py
+
+# no dependency on setup.py.in to regenerate the file every time it is needed
+# why is this needed?
+setup.py:
+	$(MAKE) $(TARGET).i
+	sed -e 's|@CPPFLAGS@|$(CPPFLAGS)|' \
+	    -e 's|@LDFLAGS@|$(LDFLAGS)|' \
+		$@.in > $@
+
+######################################################################### SIGH
+# this directory contains both local stuff and subdirs to process
+# a situation avoided everywhere else... hack
+
+# subdirs dir visits
+SUBS	= drivers/sac/impl drivers/terapyps drivers/broker
+SUBS.dir	= $(SUBS:%=%.dir)
+
+%.dir:;	$(MAKE) -C $* $(WHAT)
+
+compile: WHAT=compile
+phase5: WHAT=phase5
+clean: WHAT=clean
+
+clean: $(SUBS.dir)
+compile:$(SUBS.dir)
+phase5: $(SUBS.dir)

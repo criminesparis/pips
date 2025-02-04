@@ -1,0 +1,14 @@
+#
+# $Id: fabien_pau.cron 23134 2016-07-07 05:49:54Z coelho $
+#
+# Ubuntu 16.04 Xenial x86_64 on TIGNES
+#
+# partial spear dev version
+#
+5 4 * * * /home/fabien/SPDEV/pips_check_compile --wait --force --report --keepfail --source=/home/fabien/SPDEV/pipsrc.sh --validation-option TARGET=Spear pips-validation@cri.mines-paristech.fr /home/fabien/SPDEV/spdev /home/fabien/SPDEV/pipspriv
+35 * * * * /home/fabien/SPDEV/pips_check_compile --keepfail --source=/home/fabien/SPDEV/pipsrc.sh --validation-option TARGET=Spear pips-validation@cri.mines-paristech.fr /home/fabien/SPDEV/spdev /home/fabien/SPDEV/pipspriv
+#
+# full spear dev version
+#
+20 4 * * * /home/fabien/SPDV2/pips_check_compile --wait --force --report --keepfail --source=/home/fabien/SPDV2/pipsrc.sh pips-validation@cri.mines-paristech.fr /home/fabien/SPDV2/spdev /home/fabien/SPDV2/validation
+50 * * * * /home/fabien/SPDV2/pips_check_compile --keepfail --source=/home/fabien/SPDV2/pipsrc.sh pips-validation@cri.mines-paristech.fr /home/fabien/SPDV2/spdev /home/fabien/SPDV2/validation

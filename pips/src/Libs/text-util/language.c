@@ -1,0 +1,163 @@
+/*
+
+  $Id: language.c 23065 2016-03-02 09:05:50Z coelho $
+
+  Copyright 1989-2016 MINES ParisTech
+
+  This file is part of PIPS.
+
+  PIPS is free software: you can redistribute it and/or modify it
+  under the terms of the GNU General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  any later version.
+
+  PIPS is distributed in the hope that it will be useful, but WITHOUT ANY
+  WARRANTY; without even the implied warranty of MERCHANTABILITY or
+  FITNESS FOR A PARTICULAR PURPOSE.
+
+  See the GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License
+  along with PIPS.  If not, see <http://www.gnu.org/licenses/>.
+
+*/
+#ifdef HAVE_CONFIG_H
+    #include "pips_config.h"
+#endif
+/*
+ * The motivation of text is to delay string concatenation by dealing with
+ * lists of strings instead as more as possible.
+ */
+
+#include <stdio.h>
+#include <stdarg.h>
+#include <string.h>
+#include <ctype.h> // isdigit()
+
+#include "genC.h"
+#include "linear.h" // needed for ri.h
+
+#include "misc.h"
+#include "properties.h"
+
+// FC: this one is bad, but the point is to avoid including ri-util...
+#include "ri.h"
+
+#include "text-util.h"
+
+/*===================== Language management ===========*/
+
+/* The prettyprint language */
+static language prettyprint_language = language_undefined;
+/**
+ * @brief please avoid using this function directly, use predicate instead
+ * (see below)
+ * @return the prettyprint language as a newgen language object
+ */
+language get_prettyprint_language () {
+  if (prettyprint_language == language_undefined)
+    prettyprint_language = make_language_fortran ();
+  return prettyprint_language;
+}
+
+
+/**
+ * @return the prettyprint language as a language_utype
+ **/
+enum language_utype get_prettyprint_language_tag () {
+  return language_tag (get_prettyprint_language ());
+}
+
+
+/**
+ * @return true if the language is f77
+ **/
+bool prettyprint_language_is_fortran_p () {
+  return (get_prettyprint_language_tag () == is_language_fortran);
+}
+
+
+/**
+ * @return true if the language is f95
+ **/
+bool prettyprint_language_is_fortran95_p () {
+  return (get_prettyprint_language_tag () == is_language_fortran95);
+}
+
+
+/**
+ * @return true if the language is C
+ **/
+bool prettyprint_language_is_c_p () {
+  return (get_prettyprint_language_tag () == is_language_c);
+}
+
+/**
+ * @brief set the prettyprint language according to the property
+ * PRETTYPRINT_LANGUAGE
+ * @description If the property PRETTYPRINT_LANGUAGE is set to the special
+ * value "native" then the language passed in arg is used, usually it's the
+ * module native language. The user can set "F77", "F95", or "C" to force the
+ * prettyprint of a language.
+ */
+void set_prettyprint_language_from_property( enum language_utype native ) {
+  if (prettyprint_language == language_undefined) {
+    prettyprint_language = make_language_fortran ();
+  }
+  const char* lang = get_string_property ("PRETTYPRINT_LANGUAGE");
+  if (strcmp (lang, "F77") == 0) {
+    language_tag (prettyprint_language) = is_language_fortran;
+  }
+  else if (strcmp (lang, "C") == 0) {
+    language_tag (prettyprint_language) = is_language_c;
+  }
+  else if (strcmp (lang, "F95") == 0) {
+    language_tag (prettyprint_language) = is_language_fortran95;
+  }
+  else if (strcmp (lang, "native") == 0) {
+    language_tag (prettyprint_language) = native;
+  } else {
+    pips_internal_error("bad property value for language");
+  }
+}
+
+
+/**
+   @brief set the prettyprint language from a newgen language object
+   @param lang, the language to be used to set the prettyprint_language
+   variable, content is copied so caller may free if it was malloced
+ **/
+void set_prettyprint_language (language lang) {
+  if (prettyprint_language == language_undefined)
+    prettyprint_language = make_language_fortran ();
+  *prettyprint_language = *lang;
+}
+
+
+/**
+   @brief set the prettyprint language from a language_utype argument
+   @param lang, the language to be used to set the prettyprint_language
+   variable
+ **/
+
+void set_prettyprint_language_tag (enum language_utype lang) {
+  if (prettyprint_language == language_undefined)
+    prettyprint_language = make_language_fortran ();
+  language_tag (prettyprint_language) = lang;
+}
+
+/* Get the prettyprint format of a C label
+
+   @param label a string to render
+
+   @return the printf-format string
+ */
+string get_C_label_printf_format(const char* label) {
+  /* If the label begin with a digit, prefix it with a 'l' to be C
+     compatible.
+
+     Hmmm, this does not verify that there is no such label in the program
+     already... :-( Should be solved quite earlier anyway...
+  */
+  return isdigit(label[0]) ? "l%s:" : "%s:";
+}

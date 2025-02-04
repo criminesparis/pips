@@ -1,0 +1,19 @@
+# $Id: fabien_hendaye.cron 23641 2021-03-07 07:27:24Z coelho $
+#
+# Ubuntu 18.04 bionic on Hendaye
+#
+# account crontab at CRI on hendaye
+#   bootstrap with: login@host> setup_pips.sh <version>
+#   fix <version>/pipsrc.sh
+#   copy scripts in ~/NIGHT/
+#   must fix PIPS_F77 and PIPS_FLINT, gfortran package is needed
+#   BEWARE: this updates the online documentation
+#
+03 22 * * * $HOME/NIGHT/pips_check_compile --force --report --nlpmake=htdoc --source=$HOME/NIGHT/pipsrc.sh --exec=$HOME/NIGHT/pips_publish_www.sh pips-validation@cri.mines-paristech.fr $HOME/NIGHT/prod $HOME/NIGHT/validation
+#
+# compile pips from scratch, static & dynamic
+#
+33 20 * * * /home/fabien/pips_compile_from_scratch.sh --light --static STATIC $HOME/STATIC.log coelho@cri.mines-paristech.fr
+33 21 * * * /home/fabien/pips_compile_from_scratch.sh --light --dynamic DYNAMIC $HOME/DYNAMIC.log coelho@cri.mines-paristech.fr
+33 22 * * * /home/fabien/pips_compile_from_scratch.sh --light --dynamic --pyconf=python2-config PY2 $HOME/PY2.log coelho@cri.mines-paristech.fr
+33 23 * * * /home/fabien/pips_compile_from_scratch.sh --light --dynamic --pyconf=python3-config PY3 $HOME/PY3.log coelho@cri.mines-paristech.fr

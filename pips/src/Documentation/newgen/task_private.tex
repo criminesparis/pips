@@ -1,0 +1,79 @@
+%%
+%% $Id$
+%%
+%% Copyright 1989-2014 MINES ParisTech
+%% Copyright 2009-2010 HPC Project
+%%
+%% This file is part of PIPS.
+%%
+%% PIPS is free software: you can redistribute it and/or modify it
+%% under the terms of the GNU General Public License as published by
+%% the Free Software Foundation, either version 3 of the License, or
+%% any later version.
+%%
+%% PIPS is distributed in the hope that it will be useful, but WITHOUT ANY
+%% WARRANTY; without even the implied warranty of MERCHANTABILITY or
+%% FITNESS FOR A PARTICULAR PURPOSE.
+%%
+%% See the GNU General Public License for more details.
+%%
+%% You should have received a copy of the GNU General Public License
+%% along with PIPS.  If not, see <http://www.gnu.org/licenses/>.
+%%
+\documentclass[a4paper]{article}
+
+\usepackage[latin1]{inputenc}
+\usepackage{newgen_domain}
+\usepackage[backref,pagebackref]{hyperref}
+\usepackage[nofancy]{svninfo}
+% \usepackage{array}
+% \usepackage{listings}
+% %% To generate an index:
+% \usepackage{makeidx}
+% \makeindex
+
+\title{PIPS: Task}
+\author{Nelson Lossing \\
+  \\
+  CRI, M\&S, MINES ParisTech  \\
+}
+\date{\svnInfoLongDate{}, revision r\svnInfoRevision}
+
+\begin{document}
+\svnInfo $Id$
+
+\maketitle
+% \lstset{language=C}
+\section*{Introduction}
+
+
+\section{Imported Domains}
+
+Internal representation dependencies.
+
+\domain{import statement from "ri.newgen"}
+{}
+
+\domain{import entity from "ri.newgen"}
+{}
+
+\section{Task}
+
+task:
+
+id of the task
+
+on\_cluster id of the cluster in which the task will be executed
+
+private\_data list of entity private of the task, don't need to communicate with the other cluster
+
+
+\domain{task = id:int x private\_data:entity* x on\_cluster:int x synchronization:bool}
+{}
+
+
+\domain{statement\_task = persistant statement -> task}
+{}
+
+\end{document}
+\end

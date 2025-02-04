@@ -1,0 +1,84 @@
+#! @PYTHON@
+# -*- coding: utf-8 -*-
+
+"""iPyPS -- An enhanced Interactive Python front-end to PIPS
+
+This is inspired by the ipython script to lauch iPyPs instead of iPython
+
+Ronan.Keryell@hpc-project.com
+"""
+
+# The banner used for ipyps greeting
+banner = """Welcome to iPyPS, the interactive Python PIPS environment shell
+
+?         -> Introduction and overview of IPython's features.
+%quickref -> Quick reference.
+help      -> Python's own help system.
+object?   -> Details about 'object'. ?object also works, ?? prints more.
+
+workspace -> the method to start with a PIPS workspace,
+              a program database to work on;
+module    -> to manipulate a PIPS module (a function, a procedure);
+modules   -> to manipulate a set of PIPS modules.
+%load     -> load and execute a PyPS file
+"""
+
+
+import sys
+
+# Inject line arguments to set the default prompt to something with iPyPS:
+# FC: strange, could not it be passed to the shell constructor somehow?
+sys.argv[1:1] = [ '-prompt_in1', 'iPyPS [\#]: ']
+
+# Load IPython, be compatible with several versions...
+
+import IPython
+
+# FC: Python philosophy about upward compatibility is a (very bad) joke:-(
+#  - some updates to work with 2.7.6 & ipython 1.2.1
+#  - whether it still work for others is an open question, I cannot test
+#  - probably most of that is obsolete code…
+
+if hasattr(IPython, 'ipapi'):
+	# very very very old ipython
+	ip = IPython.ipapi.get()
+	register_line_magic = ip.expose_magic
+else:
+	if hasattr(IPython, 'Shell'):
+		# very very old ipython
+		from IPython.Shell import IPShellEmbed as IPShell
+		# use a dictionary to match the parameter name change
+		shell_params = { 'banner' : banner }
+	elif hasattr(IPython, 'frontend'):
+		# very old ipython
+		from IPython.frontend.terminal.embed \
+			import InteractiveShellEmbed as IPShell
+		shell_params = { 'banner1' : banner }
+	else: # no 'frontend'
+		# quite old ipython?
+		from IPython.terminal.embed import InteractiveShellEmbed as IPShell
+            
+		shell_params = { 'banner1' : banner }
+	ip = IPShell(**shell_params)
+	if hasattr(ip, 'define_magic'):
+		register_line_magic = ip.define_magic
+	else:
+		from IPython.core.magic import register_line_magic
+
+# Load PyPS:
+from pyps import *
+
+# Create an embedded shell to inherit pyps current namespace into the
+# interactive one. I guess there is a more direct way...
+@register_line_magic
+def load_pyps(self, filename):
+    "Load and execute a PyPS file"
+    try:
+        exec(open(filename).read())
+    # To avoid crashing iPython if something goes wrong:
+    except:
+        # We cannot get the exception because of 2.5 compliancy:
+        print("Error while loading PyPS file '%s'" % filename)
+
+# Call the iPython shell itself:
+ip()

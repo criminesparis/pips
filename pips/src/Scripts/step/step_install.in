@@ -1,0 +1,29 @@
+#!/bin/bash
+# Copyright 2007, 2008, 2009 Alain Muller, Frederique Silber-Chaussumier
+#
+#This file is part of STEP.
+#
+#The program is distributed under the terms of the GNU General Public
+#License.
+
+# Ce script installe dans le répertoire $DEST_DIR les fichiers générés dans le répertoire $SRC_DIR et les fichiers de la runtime de STEP
+# - le premier argument indique le répertoir d'instalation $DEST_DIR
+# - le suivant indique le répertoire contenant les fichiers générés
+
+DEST_DIR=$1
+SRC_DIR=$2
+
+STEP_RT=step_rt
+
+#filtrage des includes et deplacement des fichiers générés
+step_filtre_include $DEST_DIR $SRC_DIR/*
+
+#installation des fichiers de la runtime
+mkdir -p $DEST_DIR/$STEP_RT
+
+prefix=@prefix@
+datarootdir=@datarootdir@
+cp @datadir@/step/c/* $DEST_DIR/$STEP_RT
+
+#installation du Makefile par defaut
+cp @datadir@/step/Makefile $DEST_DIR

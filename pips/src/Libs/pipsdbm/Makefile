@@ -1,0 +1,78 @@
+# $Id: Makefile 23065 2016-03-02 09:05:50Z coelho $
+#
+# Copyright 1989-2016 MINES ParisTech
+#
+# This file is part of PIPS.
+#
+# PIPS is free software: you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# any later version.
+#
+# PIPS is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.
+#
+# See the GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with PIPS.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+TARGET	= pipsdbm
+
+LIB_CFILES = \
+	database.c \
+	lowlevel.c \
+	workspace.c \
+	externals.c \
+	util.c \
+	misc.c
+
+INC_TARGET = $(TARGET).h
+
+LIB_TARGET = lib$(TARGET).a
+
+# common stuff
+ROOT    = ../../..
+PROJECT = pips
+include $(ROOT)/makes/main.mk
+
+clean: local-clean
+local-clean:
+	$(RM) methods-inc.h
+
+methods.h: methods-inc.h
+lowlevel.c: methods-inc.h
+
+# File methods-inc.h has not header to warn the reader it is a
+# generated file from methods-inc.spec
+
+# special stuff
+ifdef PIPS_SPECIAL
+# some resources may not be generated this will require guards
+methods-inc.h: methods-inc.spec
+	{ \
+	  echo "/*" ; \
+	  echo " * THIS FILE IS GENERATED AUTOMATICALLY, DO NOT EDIT" ; \
+	  echo " */" ; \
+	  echo ; \
+	  perl -p \
+	    -e 's/#/\/\//;' \
+	    -e 's/^(\w+):\s*(\w+)/#ifdef $$1%{ $$1, $$2 },%#endif%/;' $< | \
+	    tr '%' '\012' ; \
+	} > $@
+else
+methods-inc.h: methods-inc.spec
+# all resources are expected
+	{ \
+	  echo "/*" ; \
+	  echo " * THIS FILE IS GENERATED AUTOMATICALLY, DO NOT EDIT" ; \
+	  echo " */" ; \
+	  echo ; \
+	  perl -p \
+	    -e 's/#/\/\//;' \
+	    -e 's/^(\w+)\s*:\s*(\w+)/{ $$1, $$2 },/;' $< ; \
+	} > $@
+endif # PIPS_SPECIAL
+

@@ -1,0 +1,243 @@
+/*
+
+  $Id$
+
+  Copyright 1989-2016 MINES ParisTech
+
+  This file is part of PIPS.
+
+  PIPS is free software: you can redistribute it and/or modify it
+  under the terms of the GNU General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  any later version.
+
+  PIPS is distributed in the hope that it will be useful, but WITHOUT ANY
+  WARRANTY; without even the implied warranty of MERCHANTABILITY or
+  FITNESS FOR A PARTICULAR PURPOSE.
+
+  See the GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License
+  along with PIPS.  If not, see <http://www.gnu.org/licenses/>.
+
+*/
+#ifdef HAVE_CONFIG_H
+    #include "pips_config.h"
+#endif
+ /*
+  * Functions to prettyprint expressions
+  */
+
+#include <stdio.h>
+#include <string.h>
+#include <ctype.h>
+
+#include "linear.h"
+#include "genC.h"
+#include "misc.h"
+#include "ri.h"
+
+#include "text.h"
+#include "text-util.h" // words stuff
+
+#include "ri-util.h"
+#include "workspace-util.h"
+#include "prettyprint.h"
+
+void fprint_expression(FILE * f, expression e)
+{
+  list pdl = NIL;
+  print_words(f, words_syntax(expression_syntax(e), &pdl));
+  gen_free_list(pdl);
+}
+
+/* no file descriptor is passed to make is easier to use in a debugging
+   stage.
+   Do not make macros of those printing functions */
+
+void print_expression(expression e)
+{
+  if(e==expression_undefined)
+    (void) fprintf(stderr,"EXPRESSION UNDEFINED\n");
+  // For debugging with gdb, dynamic type checking
+  else if(expression_domain_number(e)!=expression_domain)
+    (void) fprintf(stderr,"Arg. \"e\"is not an expression.\n");
+  else {
+    normalized n;
+    (void) fprintf(stderr,"syntax = ");
+    print_syntax(expression_syntax(e));
+    (void) fprintf(stderr,"\nnormalized = ");
+    if((n=expression_normalized(e))!=normalized_undefined)
+      print_normalized(n);
+    else
+      (void) fprintf(stderr,"NORMALIZED UNDEFINED\n");
+  }
+}
+
+string expression_to_string(expression e) {
+  list pdl = NIL;
+  list l = words_expression(e, &pdl) ;
+  string out = words_to_string(l);
+  FOREACH(STRING,w,l) free(w);
+  gen_free_list(l);
+  gen_free_list(pdl);
+  return out;
+}
+
+string reference_to_string(reference r) {
+    list pdl = NIL;
+    list l = words_reference(r,&pdl) ;
+    gen_free_list(pdl);
+    string out = words_to_string(l);
+    FOREACH(STRING,w,l) free(w);
+    gen_free_list(l);
+    return out;
+}
+
+
+void print_expressions(list le)
+{
+
+  MAP(EXPRESSION, e , {
+    print_expression(e);
+      },
+    le);
+
+}
+
+void print_syntax_expressions(list le)
+{
+
+  MAP(EXPRESSION, e , {
+    print_syntax(expression_syntax(e));
+    if(!ENDP(CDR(le))) {
+	(void) fprintf(stderr, ", ");
+    }
+      },
+    le);
+
+}
+
+void print_syntax(syntax s)
+{
+  list pdl = NIL;
+  print_words(stderr,words_syntax(s, &pdl));
+  gen_free_list(pdl);
+}
+
+void fprint_reference(FILE * fd, reference r)
+{
+  if(reference_undefined_p(r))
+    fprintf(fd, "reference undefined\n");
+  // For debugging with gdb, dynamic type checking
+  else if(reference_domain_number(r)!=reference_domain)
+    fprintf(fd, "Not a Newgen \"reference\" object\n");
+  else {
+    list pdl = NIL;
+    print_words(fd,words_reference(r, &pdl));
+    gen_free_list(pdl);
+  }
+}
+
+void print_reference(reference r)
+{
+  fprint_reference(stderr, r);
+}
+
+void print_reference_list(list lr)
+{
+    if(ENDP(lr))
+	fputs("NIL", stderr);
+    else
+	MAPL(cr,
+	 {
+	     reference r = REFERENCE(CAR(cr));
+	     entity e = reference_variable(r);
+	     (void) fprintf(stderr,"%s, ", entity_local_name(e));
+	 },
+	     lr);
+
+    (void) putc('\n', stderr);
+}
+
+void print_references(list rl)
+{
+  print_reference_list(rl);
+}
+
+void print_normalized(normalized n)
+{
+    if(normalized_complex_p(n))
+	(void) fprintf(stderr,"COMPLEX\n");
+    else
+	/* should be replaced by a call to expression_fprint() if it's
+	   ever added to linear library */
+	vect_debug((Pvecteur)normalized_linear(n));
+}
+
+/* call maxima to simplify an expression 
+ * prefer simplify_expression !*/
+bool maxima_simplify(expression *presult) {
+    bool success = true;
+    expression result = *presult;
+    /* try to call maxima to simplify this expression */
+    if(!expression_undefined_p(result) ) {
+      list pdl = NIL;
+      list w = words_expression(result,&pdl);
+      gen_free_list(pdl);
+        string str = words_to_string(w);
+        gen_free_list(w);
+        char * cmd;
+        asprintf(&cmd,"maxima -q --batch-string \"string(fullratsimp(%s));\"\n",str);
+        free(str);
+        FILE* pout = popen(cmd,"r");
+        if(pout) {
+            /* strip out banner */
+            fgetc(pout);fgetc(pout);
+            /* look for first % */
+            while(!feof(pout) && fgetc(pout)!='%');
+            if(!feof(pout)) {
+                /* skip the three next chars */
+                fgetc(pout);fgetc(pout);fgetc(pout);
+                /* parse the output */
+                char bufline[strlen(cmd)];
+                if(fscanf(pout," %s\n",&bufline[0]) == 1 ) {
+                    expression exp = string_to_expression(bufline,get_current_module_entity());
+                    if(!expression_undefined_p(exp)) {
+                        free_expression(result);
+                        *presult=exp;
+                    }
+                    else
+                        success= false;
+                }
+            }
+            else
+                success= false;
+            pclose(pout);
+        }
+        else
+            success= false;
+        free(cmd);
+    }
+    return success;
+}
+
+/* void fprint_list_of_exp(FILE *fp, list exp_l): prints in the file "fp"
+ * the list of expression "exp_l". We separate the expressions with a colon
+ * (","). We do not end the print with a line feed.
+ */
+void fprint_list_of_exp(FILE * fp, list exp_l)
+{
+  list aux_l;
+  expression exp;
+  list pdl = NIL;
+
+  for(aux_l = exp_l; aux_l != NIL; aux_l = CDR(aux_l))
+    {
+      exp = EXPRESSION(CAR(aux_l));
+      fprintf(fp,"%s", words_to_string(words_expression(exp, &pdl)));
+      if(CDR(aux_l) != NIL)
+	fprintf(fp,",");
+    }
+  gen_free_list(pdl);
+}

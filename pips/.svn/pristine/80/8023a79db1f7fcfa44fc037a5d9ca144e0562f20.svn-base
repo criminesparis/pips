@@ -1,0 +1,54 @@
+# BOOTSTRAP & PARSING
+bootstrap
+compilation_unit_parser
+c_initializer
+c_parser
+controlizer
+callgraph
+# SEMANTICS
+transformers_intra_full
+transformers_inter_full
+transformers_inter_full_with_points_to
+summary_transformer
+initial_precondition
+program_precondition
+preconditions_intra
+# without next one, partial_eval does less
+intraprocedural_summary_precondition
+#interprocedural_summary_precondition
+interprocedural_summary_precondition_with_points_to
+preconditions_inter_full
+preconditions_inter_full_with_points_to
+# DEPENDENCES
+atomic_chains
+region_chains
+rice_regions_dependence_graph
+# EFFECTS & REGIONS
+proper_effects
+proper_effects_with_points_to
+cumulated_effects
+cumulated_effects_with_points_to
+summary_effects
+must_regions
+must_regions_with_points_to
+summary_regions
+# COMPLEXITY
+any_complexities
+# POINTS-TO (not sure which is needed)
+intraprocedural_points_to_analysis
+interprocedural_points_to_analysis
+fast_interprocedural_points_to_analysis
+# TRANSFORMATIONS
+privatize_module
+partial_eval
+coarse_grain_parallelization
+simplify_control
+# OUTPUT
+# FC: why is PRINTED_FILE used in "tspear"?
+# CA: although it is unused, it may be useful for debug
+#print_code
+print_xml_application
+print_xml_application_with_points_to
+print_xml_application_main
+# FC: hack to include points-to which is used undercover by semantics
+init_points_to_analysis

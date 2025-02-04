@@ -1,0 +1,5 @@
+usr/bin/hpfc
+usr/bin/hpfc_compile
+usr/bin/hpfc_delete
+usr/bin/hpfc_directives
+usr/bin/hpfc_install

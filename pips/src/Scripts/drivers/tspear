@@ -1,0 +1,1035 @@
+#! /bin/bash
+#
+# $Id: tspear 23412 2017-08-09 15:07:09Z irigoin $
+#
+# Copyright 1989-2016 MINES ParisTech
+#
+# This file is part of PIPS.
+#
+# PIPS is free software: you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# any later version.
+#
+# PIPS is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.
+#
+# See the GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with PIPS.  If not, see <http://www.gnu.org/licenses/>.
+#
+# TODO
+#  - remove repeated (i.e. same Description) logs?
+#  - check for some corner error cases? cat/cp/...
+
+Id='$Id: tspear 23412 2017-08-09 15:07:09Z irigoin $'
+version=${Id//* tspear /}
+version=${version// ????-??-?? */}
+
+############################################################## HELPER FUNCTIONS
+
+verbose=1
+debug=
+
+# usage: verb level message...
+# show message on stderr. levels:
+#   0: always show, even under --quiet
+#   1: default output, important messages
+#   2: what is being done
+#   3: details
+function verb()
+{
+  local level=$1
+  shift
+  if [ $verbose -ge $level ] ; then
+    echo -n '[tspear] ' >&2
+    while [ $level -gt 0 ] ; do
+      let level--
+      echo -n '#' >&2
+    done
+    echo ' '"$@" >&2
+  fi
+}
+
+function cleanup()
+{
+  if [ "$debug" ] ; then
+    verb 1 "temporary files: $tmp.*"
+  else
+    verb 2 "cleaning up temporary files and databases"
+    # ignore failures on these commands...
+    [ "$tmp" ] && rm -f $tmp.* $tmp-*.*
+    [ -d "$base-task.database" ] && rm -rf "$base-task.database"
+    [ -d "$base-box.database" ] && rm -rf "$base-box.database"
+  fi
+}
+
+# panic error, before switching to XML
+function err()
+{
+  local code=$1
+  shift 1
+  echo '[tspear] error: '"$@" >&2
+  echo "for help, try: $0 --help or --man" >&2
+  cleanup
+  exit $code
+}
+
+# append arguments to xml output
+function appxml()
+{
+  echo "$@" >> $tmp.xml
+}
+
+# cat file to xml output
+function catxml()
+{
+  cat "$@" >> $tmp.xml
+}
+
+function startxml()
+{
+  # encoding?
+  appxml '<?xml version="1.0" ?>'
+  appxml '<!-- PIPS tspear XML output for SPEAR -->'
+  appxml "<!DOCTYPE SpearApplication SYSTEM \"$dtd\">"
+  appxml '<SpearApplication>'
+}
+
+function stopxml()
+{
+  appxml '</SpearApplication>'
+  appxml '<!-- PIPS tspear XML output for SPEAR done -->'
+}
+
+function startlogs()
+{
+  local name=$1 code=$2
+  appxml "<Logs Name=\"$name\" Code=\"$code\">"
+}
+
+function stoplogs()
+{
+  appxml "</Logs>"
+}
+
+application_modules='[^"]*'
+# dologs name code file
+function dologs()
+{
+  startlogs "$1" "$2"
+  #catxml "$3"
+  # only show logs about application modules
+  MODULES="$application_modules" \
+    perl -w -mstrict -n -- - "$3" >> $tmp.xml <<-'EOF'
+	if (/^<SpearWarning>$/) {
+	  my $start = $_;
+	  my $desc = <>;
+	  my $end = <>;
+	  chomp $end;
+	  my $ok = ($desc !~ / AppFunction=/ or
+	    $desc =~ / AppFunction="($ENV{MODULES})"/);
+	  print(($ok? '': "<!-- "), "$start$desc$end", ($ok? "\n": " -->\n"));
+	}
+	else {
+	  print;
+	}
+	EOF
+  stoplogs
+}
+
+# output generated xml either to target file or stdout
+function showxml()
+{
+  if [ "$xmlfile" ] ; then
+    cat $tmp.xml > "$xmlfile"
+  else
+    cat $tmp.xml
+  fi
+}
+
+# code, status, message
+function exitxml()
+{
+  local code=$1 status=$2 msg=$3
+  appxml "<Exit Code=\"$code\" Status=\"$status\" Message=\"$msg\" />"
+}
+
+# full XML output on error & exit
+function errxml()
+{
+  local code=$1 status=$2 msg=$3
+
+  startxml
+  startlogs "tspear" "$code" "$status"
+  appxml "<!-- this is a tspear error, no Description nor other Logs -->"
+  exitxml "$code" "$status" "[tspear] $msg"
+  stoplogs
+  stopxml
+
+  showxml
+  cleanup
+  exit $code
+}
+
+# check XML file
+function checkxml()
+{
+  local dir="$1" file="$2" tag="$3"
+  if ! [ -d "$dir" ] ; then
+    errxml 111 'ERROR' "missing XML file directory '$dir'"
+  elif ! [ -r "$dir/$file" ] ; then
+    errxml 112 'ERROR' "cannot read XML file '$file'"
+  elif ! [ -s "$dir/$file" ] ; then
+    errxml 113 'ERROR' "empty XML file '$file'"
+  elif ! grep -i "</$tag>" "$dir/$file" > /dev/null 2>&1 ; then
+    errxml 114 'ERROR' "bad XML $tag file '$file'"
+  fi
+}
+
+######################################################### OPTIONS AND ARGUMENTS
+
+now=$(date +%Y%m%d%H%M%S)
+
+base=tspear_$$_$now
+func=main
+xmlfile=
+cppopts=
+timeout=
+dtd='APPLI_SPEAR_v7.dtd'
+xmllint=
+points_to=
+absolute=
+tmpdir=/tmp
+postgen=
+parallel=1
+logs=1
+dotask='task'
+tpips_added=()
+build='tspear-build-xml.pl'
+
+# take options from environment... could be an array?
+if [ "$TSPEAR_OPTIONS" ] ; then
+  verb 1 "importing options: '$TSPEAR_OPTIONS'"
+  set -- $TSPEAR_OPTIONS "$@"
+fi
+
+# option management
+while [[ $1 == -* ]] ; do
+  case $1 in
+    # tspear options
+    -d|--debug) debug=1 ;;
+    -v|--verbose) let verbose+=1 ;;
+    -q|--quiet) verbose=0 ;;
+    -h|--help)
+      {
+	echo "$0: tpips driver for spear"
+        echo "usage: tspear [-dhvm] [-o out] [cpp-options] c-files..."
+	echo "  -d: debug mode, keep temporary files and databases"
+	echo "  -v: verbose mode, repeat for more, default is verbosity level 1"
+	echo "  -q: quiet mode, set verbosity level to 0"
+	echo "  -h: show this help & exit 0"
+	echo "  -m: show manual page"
+	echo "  -V: show version information & exit 0"
+	echo "  -b name: pips database name prefix (default is $base)"
+	echo "  -o out.xml: xml output file (default is stdout)"
+	echo "  -f func: starting function (default is main)"
+	echo "  -t delay: tpips timeout (default none)"
+	echo "  -T dir: temporary directory (default $tmpdir)"
+	echo "  -a: use absolute path for files"
+	echo "  --dtd url: DTD for the generated file, (default is $dtd)"
+	echo "  -x: run xmllint (well-formed & valid, DTD is required!)"
+	echo "  -I/-D/-U/-W ...: options forwarded to cpp"
+	echo "  c-files...: C source files to process"
+      } >&2
+      exit 0
+      ;;
+    -m|--man)
+      if ! type pod2usage > /dev/null 2>&1 ; then
+        err 14 "pod2usage not found"
+      fi
+      exec pod2usage -v 2 $0
+      ;;
+    -V|--version)
+      echo "$0 version: $version"
+      exit 0
+      ;;
+    --sequential) parallel= ;;
+    --no-logs) logs= ;;
+    --no-task) dotask= ;;
+    # root function
+    -f|--func|--function) func=$2 ; shift ;;
+    --func=*) func=${1//*=/} ;;
+    # xml output file
+    -o|--out) xmlfile=$2 ; shift ;;
+    --out=*) xmlfile=${1//*=/} ;;
+    # pips database prefix
+    -b|--base) base=$2 ; shift ;;
+    --base=*) base=${1//*=/} ;;
+    # timeout
+    -t|--timeout) timeout=$2 ; shift ;;
+    --timeout=*) timeout=${1//*=/} ;;
+    # temporary directory
+    -T|--tmp|--tmpdir) tmpdir=$2 ; shift ;;
+    --tmp=*|--tmpdir=*) tmpdir=${1//*=/} ;;
+    # explicit DTD
+    --dtd) dtd=$2 ; shift ;;
+    --dtd=*) dtd=${1//*=/} ;;
+    # run xmllint
+    -x|--xmllint) xmllint=1 ;;
+    # use absolute path
+    -a|--absolute) absolute=1 ;;
+    # whether to use points-to
+    --with-points-to|--pt) points_to=1 ;;
+    --without-points-to|--no-pt|--npt) points_to= ;;
+    # cpp options
+    # handle -D (define) -U (undef) -I (include) and -W (warning)
+    -[DUIW]?*) cppopts+=" $1" ;;
+    -[DUIW]) cppopts+=" $1 $2" ; shift ;;
+    # non documented hooks for non regression tests
+    # run as: $postgen base func db1 db2 log1 log2
+    --post-gen-hook) postgen=$2 ; shift ;;
+    --post-gen-hook=*) postgen=${1//*=/} ;;
+    --tpips-add) tpips_added+=("$2"); shift ;;
+    --tpips-add=*) tpips_added+=("${1//*=/}") ;;
+    # others
+    *) err 10 "unexpected option $1" ;;
+  esac
+  shift
+done
+
+# hmmm, not that useful... just checked ahead of tpips run
+if [ "$xmlfile" ] ; then
+  verb 3 "xmlfile=$xmlfile"
+  # remove & recreate file
+  rm -f $xmlfile > /dev/null 2>&1 || err 11 "cannot rm '$xmlfile'"
+  touch $xmlfile > /dev/null 2>&1 || err 12 "cannot touch '$xmlfile'"
+fi
+
+verb 3 "tmpdir=$tmpdir"
+
+if [ ! -d "$tmpdir" ] ; then
+  err 15 "no such directory '$tmpdir'"
+fi
+
+if [ ! -w "$tmpdir" ] ; then
+  err 16 "cannot write to directory '$tmpdir'"
+fi
+
+if [ "$postgen" ] ; then
+  verb 3 "postgen=$postgen"
+  if ! type $postgen > /dev/null 2>&1 ; then
+    err 18 "post generation script '$postgen' not found"
+  fi
+fi
+
+# set directory & file prefix for temporary files
+tmp=$tmpdir/tspear_$$_$now
+verb 3 "temporary files: tmp=$tmp"
+
+# once options are ok, switch to XML output
+
+################################################################# SANITY CHECKS
+
+if [ $# -eq 0 ] ; then
+  errxml 100 "USER_ERROR" "no source file to process"
+fi
+
+# check for needed executables
+err=100
+#          101   102                 103     104  105  106 107
+for exe in tpips $build xmllint perl grep rm timeout ; do
+  let err+=1
+  # possibly skip xmllint check
+  if [ $exe = 'xmllint' -a ! "$xmllint" ] ; then
+    continue
+  fi
+  if ! type $exe > /dev/null 2>&1 ; then
+    errxml $err "USER_ERROR" "$exe not found"
+  fi
+done
+
+# check for touch? not really necessary, if it fails the fopen will fail and
+# be reported from tpips anyway.
+
+
+if [ "$timeout" ] ; then
+  # check that timeout delay is an int
+  let x=$(($timeout + 0)) || \
+    errxml 108 'USER_ERROR' "timeout '$timeout' must be an integer"
+  timeout_cmd="timeout -s KILL $timeout"
+else
+  timeout_cmd=
+fi
+
+# cleanup traces from previous runs
+for suff in .inc .tpips .out -box.{log,tpips} -task.{log,tpips} ; do
+  if [ -f $tmp$suff ] ; then
+    errxml 109 "USER_ERROR" "already existing temporary file: '$tmp$suff'"
+  fi
+done
+
+#################################### SANITY OK, RUN TPIPS AND AGGREGATE RESULTS
+
+# extract includes with a perl one liner:-)
+# NOTE: this should really be "$@", but handling of file names
+# with spaces is broken in tpips anyway, and this help with ant
+# which seems to pass file names as one argument.
+verb 2 "generating: $tmp.inc"
+# no -w: dv used only once...
+perl -n \
+  -e 'print "$1\n" if /^\s*#\s*include\s*[<"](.*?)[>"]/ && ! $dv{$1}++;' \
+  $@ > $tmp.inc
+
+# if an absolute file name is required, change it here
+if [ "$absolute" ] ; then
+  set $(for f in $@ ; do
+          if [[ $f == /* ]] ; then echo $f ; else echo $PWD/$f ; fi ;
+        done)
+fi
+
+if [ "$points_to" ] ; then
+  verb 3 "with points-to"
+  PROPERTIES='
+# with POINTS-TO
+setproperty SEMANTICS_FIX_POINT_OPERATOR "derivative"
+setproperty ABSTRACT_HEAP_LOCATIONS "flow-sensitive"
+setproperty POINTS_TO_STRICT_POINTER_TYPES FALSE
+setproperty CONSTANT_PATH_EFFECTS TRUE
+'
+  ACTIVATE_INTRA='
+# with POINTS-TO
+activate PROPER_EFFECTS_WITH_POINTS_TO
+activate CUMULATED_EFFECTS_WITH_POINTS_TO
+# should be INTRA...
+activate TRANSFORMERS_INTER_FULL_WITH_POINTS_TO
+activate PRECONDITIONS_INTER_FULL_WITH_POINTS_TO
+activate INTRAPROCEDURAL_SUMMARY_PRECONDITION
+# should be: INTRAPROCEDURAL_SUMMARY_PRECONDITION_WITH_POINTS_TO
+#activate INTERPROCEDURAL_SUMMARY_PRECONDITION_WITH_POINTS_TO
+activate MUST_REGIONS_WITH_POINTS_TO
+activate PRINT_XML_APPLICATION_WITH_POINTS_TO
+'
+  ACTIVATE_INTER='
+# with POINTS-TO
+activate PROPER_EFFECTS_WITH_POINTS_TO
+activate CUMULATED_EFFECTS_WITH_POINTS_TO
+activate TRANSFORMERS_INTER_FULL_WITH_POINTS_TO
+activate PRECONDITIONS_INTER_FULL_WITH_POINTS_TO
+activate INTERPROCEDURAL_SUMMARY_PRECONDITION_WITH_POINTS_TO
+activate MUST_REGIONS_WITH_POINTS_TO
+activate PRINT_XML_APPLICATION_WITH_POINTS_TO
+'
+else
+  verb 3 "no points-to"
+  PROPERTIES='
+# without POINTS-TO
+setproperty CONSTANT_PATH_EFFECTS TRUE
+'
+  ACTIVATE_INTRA='
+# without POINTS-TO
+# should be INTRA...
+#activate PRECONDITIONS_INTER_FULL
+#activate TRANSFORMERS_INTER_FULL
+activate PRECONDITIONS_INTRA
+activate TRANSFORMERS_INTRA_FULL
+activate INTRAPROCEDURAL_SUMMARY_PRECONDITION
+activate MUST_REGIONS
+activate PRINT_XML_APPLICATION
+'
+  ACTIVATE_INTER='
+# without POINTS-TO
+activate PRECONDITIONS_INTER_FULL
+activate TRANSFORMERS_INTER_FULL
+# keep intra? seems enough...
+activate INTRAPROCEDURAL_SUMMARY_PRECONDITION
+activate MUST_REGIONS
+activate PRINT_XML_APPLICATION
+'
+fi
+
+# convert array to lines
+TPIPS_ADDED=$(for l in "${tpips_added[*]}" ; do echo $l ; done)
+
+# generate tpips script, convenient if needed for debug
+verb 2 "generating: $tmp-task.tpips $tmp-box.tpips"
+
+cat > $tmp-box.tpips <<EOF
+# tpips common script for spear
+# - base=$base
+# - func=$func
+# - cppopts=$cppopts
+# - tmp=$tmp
+# - *=$@
+
+# set cpp flags for pips
+setenv PIPS_CPP_FLAGS "$cppopts -I."
+
+# try a clean stop on user errors
+setproperty CLOSE_WORKSPACE_AND_QUIT_ON_ERROR TRUE
+
+# skip some properties by pipsmake
+setproperty PIPSMAKE_WARNINGS FALSE
+
+# what is the main
+setproperty XML_APPLICATION_MAIN "$func"
+
+# set properties
+setproperty PRETTYPRINT_STATEMENT_NUMBER FALSE
+setproperty FOR_TO_DO_LOOP_IN_CONTROLIZER TRUE
+setproperty FOR_TO_WHILE_LOOP_IN_CONTROLIZER TRUE
+setproperty SEMANTICS_COMPUTE_TRANSFORMERS_IN_CONTEXT FALSE
+setproperty MEMORY_EFFECTS_ONLY FALSE
+setproperty USER_EFFECTS_ON_STD_FILES FALSE
+setproperty ALIASING_ACROSS_IO_STREAMS FALSE
+setproperty ALIASING_ACROSS_TYPES FALSE
+setproperty SEMANTICS_ANALYZE_CONSTANT_PATH TRUE
+
+# tpips added settings
+$TPIPS_ADDED
+
+# BUGGY with PRIVATIZE_MODULE:
+#   setproperty SEMANTICS_COMPUTE_TRANSFORMERS_IN_CONTEXT TRUE
+
+$PROPERTIES
+EOF
+
+# duplicate common part
+cp $tmp-box.tpips $tmp-task.tpips
+
+cat >> $tmp-task.tpips  <<EOF
+
+#
+# tpips task script for spear: intraprocedural
+#
+
+\$TSPEAR_OUT delete $base-task
+create $base-task $@
+
+# ensure that the target function exists before proceeding
+module $func
+
+make DECLARATIONS[%ALLCU]
+
+activate REGION_CHAINS
+activate RICE_REGIONS_DEPENDENCE_GRAPH
+$ACTIVATE_INTRA
+
+apply SIMPLIFY_CONTROL[$func]
+capply PRIVATIZE_MODULE[%ALLFUNC]
+capply COARSE_GRAIN_PARALLELIZATION[%ALLFUNC]
+
+# xml generation
+make SPEAR_CODE_FILE[$func]
+
+close
+EOF
+
+cat >> $tmp-box.tpips  <<EOF
+
+#
+# tpips box script for spear: interprocedural
+#
+
+\$TSPEAR_OUT delete $base-box
+create $base-box $@
+
+make DECLARATIONS[%ALLCU]
+
+activate REGION_CHAINS
+activate RICE_REGIONS_DEPENDENCE_GRAPH
+$ACTIVATE_INTER
+
+apply SIMPLIFY_CONTROL[%ALLFUNC]
+capply PRIVATIZE_MODULE[%ALLFUNC]
+capply COARSE_GRAIN_PARALLELIZATION[%ALLFUNC]
+
+# clean twice
+apply PARTIAL_EVAL[$func]
+apply PARTIAL_EVAL[$func]
+
+# xml generation
+make SPEAR_APP_FILE[$func]
+
+close
+EOF
+
+# cleanup (error check?)
+rm -rf "$base-box" "$base-task"
+
+# execute both tpips scripts
+# stderr not redirected, so as to show what is going on...
+verb 2 "running tpips scripts"
+verb 3 "generating: $tmp-{box,task}.out $tmp-{box,task}.log"
+export TSPEAR_OUT='#'
+
+if [ "$parallel" ] ; then
+
+  $timeout_cmd tpips -x $tmp-box.log $tmp-box.tpips > $tmp-box.out &
+  tpips_box_pid=$!
+
+  if [ "$dotask" ] ; then
+    $timeout_cmd tpips -x $tmp-task.log $tmp-task.tpips > $tmp-task.out &
+    tpips_task_pid=$!
+
+    wait $tpips_task_pid
+    task_status=$?
+    if [ $task_status -ne 0 ] ; then
+      if [ $task_status -eq 137 ] ; then
+	errxml 137 'TIMEOUT' "tpips task timed out"
+      fi
+      verb 1 "tpips script failed: $tmp-task.tpips"
+    fi
+    checkxml '/' "$tmp-task.log" 'exit'
+  else
+    task_status=0
+  fi
+
+  wait $tpips_box_pid
+  box_status=$?
+  if [ $box_status -ne 0 ] ; then
+    verb 1 "tpips script failed: $tmp-box.tpips"
+    if [ $box_status -eq 137 ] ; then
+      errxml 137 'TIMEOUT' "tpips box timed out"
+    fi
+  fi
+  checkxml '/' "$tmp-box.log" 'exit'
+
+else
+
+  if [ "$dotask" ] ; then
+    [ "$debug" ] && cat $tmp-task.tpips $tmp-box.tpips > $tmp.tpips
+    $timeout_cmd \
+      tpips -x $tmp-box.log $tmp-task.tpips $tmp-box.tpips > $tmp-box.out
+    box_status=$?
+  else
+    [ "$debug" ] && cp $tmp-box.tpips $tmp.tpips
+    $timeout_cmd tpips -x $tmp-box.log $tmp-box.tpips > $tmp-box.out
+    box_status=$?
+  fi
+  if [ $box_status -ne 0 ] ; then
+    verb 1 "tpips script failed: $tmp-task.tpips $tmp-box.tpips"
+    if [ $box_status -eq 137 ] ; then
+      errxml 137 'TIMEOUT' "tpips task & box timed out"
+    fi
+  fi
+  checkxml '/' "$tmp-box.log" 'exit'
+
+  task_status=0
+
+fi
+
+# regression hook after tpips run
+if [ "$postgen" ] ; then
+  if ! $postgen $base $func $base-box.database $base-task.database \
+       $tmp-box.log $tmp-task.log ;
+  then
+    err 19 "Post-generation script '$postgen' failed"
+  fi
+fi
+
+if [ $box_status -eq 0 -a $task_status -eq 0 ] ; then
+  # do various checks
+  for b in box $dotask ; do
+    db="$base-$b.database"
+    if ! [ -d "$db" ] ; then
+      errxml 110 'ERROR' "missing database '$db'"
+    else
+      checkxml "$db/$func" "$func.xml" 'box'
+    fi
+  done
+  # check that we have an xml application file
+  checkxml "$base-box.database/$func" "$func.app.xml" 'application'
+
+  # generate full application by aggregating all stuff
+  appfile="$tmp-app.xml"
+  if [ -f "$tmp.tpips" ] ; then
+    {
+      echo
+      echo "# build <Application>, although without includes"
+      echo "$build '$base-box' '${dotask:+$base-task}' '' '$func'"
+    } >> $tmp.tpips
+  fi
+  $build "$base-box" "${dotask:+$base-task}" "$tmp.inc" "$func" \
+    > "$appfile" 2> $tmp-build.log
+  build_status=$?
+  build_done=1
+
+  if [ $build_status -ne 0 ] ; then
+    verb 1 "$build failed"
+  else
+    application_modules=$(perl -n -- - "$appfile" <<-'EOF'
+	if (/<!-- boxes & tasks:(.*) -->/) {
+	  $_ = $1;
+	  s/ /|/g;
+	  print;
+	  exit 0;
+	}
+	EOF
+     )
+  fi
+else
+  build_status=1
+  build_done=''
+fi
+
+# generate XML output
+startxml
+
+# handle <Logs>
+if [ "$logs" ] ; then
+  if [ "$parallel" ] ; then
+    dologs 'tpips-box' $box_status $tmp-box.log
+    [ "$dotask" ] && dologs 'tpips-task' $task_status $tmp-task.log
+  else
+    dologs 'tpips' $box_status $tmp-box.log
+  fi
+  [ "$build_done" ] && dologs 'xml-build' $build_status $tmp-build.log
+fi
+
+# handle <Application>
+if [ $build_status -eq 0 ] ; then
+  catxml "$appfile"
+else
+  appxml '<!-- error, no Application generated -->'
+fi
+
+stopxml
+
+############################################################ VALIDATE & RESULTS
+
+# possibly run through xmllint
+if [ "$xmllint" ] ; then
+  if ! xmllint --noout $tmp.xml ; then
+    err 17 "XML not well-formed"
+  elif ! xmllint --valid --noout $tmp.xml ; then
+    err 13 "XML not validated (is the DTD available?)"
+  else
+    verb 2 "valid xml ouput: $tmp.xml"
+  fi
+fi
+
+# final status
+#appxml "<!-- tspear final status: $status -->"
+
+# show in file or on stdout
+showxml
+
+############################################################# CLEANUP ONCE DONE
+
+# cleanup temporary files unless debug
+cleanup
+
+# exit code is first bad one
+[ $box_status -ne 0 ] && exit $box_status
+[ $task_status -ne 0 ] && exit $task_status
+exit $build_status
+
+####################################################### PLAIN OLD DOCUMENTATION
+
+=pod
+
+=head1 NAME
+
+B<tspear> - generate XML application description from C source code
+
+=head1 SYNOPSIS
+
+B<tspear> [ -hmvqV... ] [ -o out.xml ] [ ... ] [ cpp-options ] c-files...
+
+=head1 DESCRIPTION
+
+B<tspear> is a tpips wrapper for spear. It generates a specific XML
+application description from C source files which matches some constraints.
+The command behaves similarly to a compiler.
+
+=head1 OPTIONS
+
+A set of options allow to change the wrapper default behavior:
+
+=over 4
+
+=item C<-a> or C<--absolute>
+
+Use absolute path for files.
+Default is to use file names as provided on the command line.
+
+=item C<-b BASE> or C<--base BASE>
+
+Use the B<BASE> path prefix for PIPS databases.
+Default uses C<tspear_XXX> where C<XXX> is the wrapper process number.
+
+=item C<-d> or C<--debug>
+
+B<tspear> debug mode: keep temporary files and PIPS databases.
+
+=item C<--dtd URL>
+
+Use B<URL> as DTD in generated XML file.
+Default is C<APPLI_SPEAR_v7.dtd>.
+
+=item C<-f FUNC> or C<--func FUNC>
+
+Generate the application description for function B<FUNC>.
+Default is to generate function C<main>.
+
+=item C<-h> or C<--help>
+
+Show a minimal help about B<tspear>.
+
+=item C<-m> or C<--man>
+
+Show manual page about B<tspear>.
+
+=item C<--no-logs>
+
+Do not include logs in generated application.
+
+=item C<--no-task>
+
+Do not run a specific tpips for tasks.
+
+=item C<-o FILE> or C<--out FILE>
+
+Generate XML application description in file B<FILE>.
+The file is overriden if it already exists.
+Default is to generate on <stdout>.
+
+=item C<-q> or C<--quiet>
+
+Quiet mode, set verbosity level to 0.
+
+=item C<--sequential>
+
+Run a single C<tpips> process for task & box generation.
+
+=item C<-t DELAY> or C<--timeout DELAY>
+
+Set a B<DELAY> seconds timeout on C<tpips>.
+
+=item C<-T DIR> or C<--tmp DIR>
+
+Use this directory for temporary files.
+
+=item C<-v> or C<--verbose>
+
+Increase B<tspear> verbosity level.
+Default is verbositly level 1.
+
+=item C<-V> or C<--version>
+
+Show B<tspear> version information and exit.
+
+=item C<-x> or C<--xmllint>
+
+Run C<xmllint> to check whether the generated XML is well-formed and valid.
+Beware, the DTD file must be found!
+
+=item C<-I...> or C<-D...> or C<-U...> or C<-W...>
+
+These options are forwarded to C<cpp> when invoked.
+
+=back
+
+=head1 ARGUMENTS
+
+The arguments provide the list of C source files to convert to XML.
+
+An error is raised if no source files are given.
+
+=head1 RESULT
+
+First, B<tspear> checks for its options and whether the target XML file can
+be created (under option C<-o>), and directly stops if it is not the case.
+
+Then the script outputs an XML file which contains tpips log, tpips exit status
+and a description of the application.
+
+The possible exit codes are:
+
+=over 4
+
+=item B<0>
+
+All is well.
+Note: with C<--help>, C<--man> and C<--version>, no XML output is generated.
+
+=item B<1>
+
+C<tpips> hit an internal (irrecoverable) error.
+
+=item B<2>
+
+C<tpips> hit a user error and was set to stop on these.
+
+=item B<3>
+
+C<tpips> stopped on too many user errors.
+
+=item B<10>
+
+B<tspear> option error (no XML file generated).
+
+=item B<11>
+
+Cannot remove preexisting target XML file (no XML file generated).
+
+=item B<12>
+
+Cannot create target XML file (no XML file generated).
+
+=item B<13>
+
+Command C<xmllint> failed to validate output (no valid XML file generated)
+
+=item B<14>
+
+Command C<pod2usage> not found (no XML file generated)
+
+=item B<15>
+
+Temporary directory not found (no XML file generated)
+
+=item B<16>
+
+Temporary directory cannot be written (no XML file generated)
+
+=item B<17>
+
+Command C<xmllint> failed to check output (no well-formed XML file generated)
+
+=item B<18>
+
+Post-generation hook script not found (no XML file generated)
+
+=item B<19>
+
+Post-generation hook script failed (no XML file generated)
+
+=item B<100>
+
+Empty argument list, no file to process.
+
+=item B<101>
+
+Command C<tpips> not found.
+
+=item B<102>
+
+Command C<tspear-build-xml.pl> not found.
+
+=item B<103>
+
+Command C<xmllint> not found.
+
+=item B<104>
+
+Command C<perl> not found.
+
+=item B<105>
+
+Command C<grep> not found.
+
+=item B<106>
+
+Command C<rm> not found.
+
+=item B<107>
+
+Command C<timeout> not found.
+
+=item B<108>
+
+Timeout B<DELAY> is not an integer.
+
+=item B<109>
+
+Temporary file obstructed by previous runs.
+
+=item B<110>
+
+Pips database not found.
+
+=item B<111>
+
+XML file directory not found.
+
+=item B<112>
+
+Unreadable XML file.
+
+=item B<113>
+
+XML file is empty.
+
+=item B<114>
+
+XML file looks bad.
+
+=item B<120>
+
+XML build failed on bad arguments.
+
+=item B<121>
+
+XML build failed to open a file.
+
+=item B<122>
+
+XML build did not find an expected header.
+
+=item B<123>
+
+XML build could not find XML for a function.
+
+=item B<124>
+
+XML build failed to open an XML printed file.
+
+=item B<125>
+
+XML build failed to open an XML application file.
+
+=item B<126>
+
+XML build failed to open an include list file.
+
+=item B<134>
+
+C<tpips> aborted (SIGABRT).
+
+=item B<137>
+
+C<tpips> timed out (SIGKILL sent by C<timeout>).
+
+=item B<139>
+
+C<tpips> core dumped (SIGSEGV).
+
+=item B<others>
+
+Various errors.
+
+=back
+
+=head1 LICENSE
+
+=for html
+<img src="https://www.gnu.org/graphics/gplv3-127x51.png"
+alt="GNU GPLv3" align="right" />
+
+Copyright 1989-2016 MINES ParisTech <pips-support [at] cri.mines-paristech.fr>
+
+This is free software, both inexpensive and with sources.
+
+The GNU General Public License v3 applies, see
+L<http://www.gnu.org/copyleft/gpl.html> for details.
+
+For the PIPS project, see L<http://pips4u.org/>.
+
+For CRI, MINES ParisTech, PSL Research University,
+see L<https://www.cri.mines-paristech.fr/>
+
+=cut

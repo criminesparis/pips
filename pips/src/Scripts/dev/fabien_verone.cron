@@ -1,0 +1,6 @@
+# $Id: fabien_verone.cron 23641 2021-03-07 07:27:24Z coelho $
+#
+# Debian Stretch i686
+#
+# compilation & validation once a day
+25 2 * * * /home/fabien/32BIT/pips_check_compile --force --report --source /home/fabien/32BIT/pipsrc.sh coelho@cri.mines-paristech.fr /home/fabien/32BIT/prod /home/fabien/32BIT/validation

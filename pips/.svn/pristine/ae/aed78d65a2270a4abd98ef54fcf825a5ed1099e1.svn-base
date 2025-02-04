@@ -1,0 +1,15 @@
+usr/lib/lib*.so.*
+usr/bin/Build
+usr/bin/Delete
+usr/bin/Display
+usr/bin/Init
+usr/bin/Perform
+usr/bin/Pips
+usr/bin/Select
+
+etc/pips/patterns.def
+etc/pips/complexity_cost_tables
+etc/pips/complexity_cost_tables/*
+etc/pips/complexity_cost_tables/*/*
+etc/pips/properties*.rc
+etc/pips/pipsmake.rc

@@ -1,0 +1,137 @@
+/*
+
+ $Id: misc.c 23412 2017-08-09 15:07:09Z irigoin $
+
+ Copyright 1989-2016 MINES ParisTech
+
+ This file is part of PIPS.
+
+ PIPS is free software: you can redistribute it and/or modify it
+ under the terms of the GNU General Public License as published by
+ the Free Software Foundation, either version 3 of the License, or
+ any later version.
+
+ PIPS is distributed in the hope that it will be useful, but WITHOUT ANY
+ WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ FITNESS FOR A PARTICULAR PURPOSE.
+
+ See the GNU General Public License for more details.
+
+ You should have received a copy of the GNU General Public License
+ along with PIPS.  If not, see <http://www.gnu.org/licenses/>.
+
+ */
+
+#ifdef HAVE_CONFIG_H
+    #include "pips_config.h"
+#endif
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <math.h>
+
+#include "genC.h"
+#include "linear.h"
+
+#include "misc.h"
+#include "pipsdbm.h"
+#include "properties.h"
+
+#include "ri.h"
+#include "ri-util.h"
+#include "text-util.h" // dump_text
+
+#include "control.h" // clean_up_sequences, module_reorder
+
+#include "effects.h"         // For "semantics.h"
+#include "transformer.h"     // used
+#include "semantics.h"       // used
+#include "effects-generic.h" // used
+
+/**
+ * Modifies the list l so it contains all the loop indexes and scalar written variables
+ * It is a little "extension" of the induction variable detection.
+ * Required by R-Stream.
+ * Depending on the activated option, only loop indexes or both loop indexes and written scalar
+ * variables are put into the list.
+ */
+void get_variables_to_remove(list ref_ent, statement s, list* l) {
+  instruction instTop = statement_instruction(s);
+  switch(instruction_tag(instTop)) {
+  case is_instruction_sequence :
+    {
+      list stmts = sequence_statements(instruction_sequence(instTop));
+      FOREACH(statement, stmt, stmts) {
+	list enclosing_loops = load_statement_enclosing_loops(s);
+	if (!ENDP(enclosing_loops) && !statement_loop_p(stmt)) {
+	  FOREACH(entity, e, ref_ent) {
+	    if (get_bool_property("OUTLINE_REMOVE_VARIABLE_RSTREAM_IMAGE")) {
+	      bool write_p = find_write_effect_on_entity(stmt, e);
+	      if (index_of_a_loop_p((Variable)e, enclosing_loops) || (write_p && !entity_array_p(e))) {
+		*l = gen_once(e,*l);
+	      }
+	    }
+	    else if (get_bool_property("OUTLINE_REMOVE_VARIABLE_RSTREAM_SCOP")) {
+	      if (index_of_a_loop_p((Variable)e, enclosing_loops)) {
+		*l = gen_once(e,*l);
+	      }
+	    }
+	  }
+	}
+	instruction inst = statement_instruction(stmt);
+	switch(instruction_tag(inst)) {
+	case is_instruction_loop :
+	  get_variables_to_remove(ref_ent, loop_body(statement_loop(stmt)), l);
+	  break;
+	case is_instruction_whileloop :
+	  get_variables_to_remove(ref_ent, whileloop_body(statement_whileloop(stmt)), l);
+	  break;
+	case is_instruction_test :
+	  get_variables_to_remove(ref_ent, test_true(instruction_test(inst)), l);
+	  get_variables_to_remove(ref_ent, test_false(instruction_test(inst)), l);
+	  break;
+	default :
+	  break;
+	}
+	
+      }
+    }
+    break;
+  case is_instruction_loop :
+    {
+      get_variables_to_remove(ref_ent, loop_body(instruction_loop(instTop)), l);
+    }
+    break;
+  case is_instruction_whileloop :
+    {
+      get_variables_to_remove(ref_ent, whileloop_body(instruction_whileloop(instTop)), l);
+    }
+    break;
+  case is_instruction_test :
+    {
+      get_variables_to_remove(ref_ent, test_true(instruction_test(instTop)), l);
+      get_variables_to_remove(ref_ent, test_false(instruction_test(instTop)), l);
+    }
+    break;
+  default :
+    {
+      list enclosing_loops = load_statement_enclosing_loops(s);
+      if (!ENDP(enclosing_loops)) {
+	FOREACH(entity, e, ref_ent) {
+	  if (get_bool_property("OUTLINE_REMOVE_VARIABLE_RSTREAM_IMAGE")) {
+	    bool write_p = find_write_effect_on_entity(s, e);
+	    if (index_of_a_loop_p((Variable)e, enclosing_loops) || (write_p && !entity_array_p(e))) {
+	      *l = gen_once(e,*l);
+	    }
+	  }
+	  else if (get_bool_property("OUTLINE_REMOVE_VARIABLE_RSTREAM_SCOP")) {
+	    if (index_of_a_loop_p((Variable)e, enclosing_loops)) {
+	      *l = gen_once(e,*l);
+	    }
+	  }
+	}
+      }
+    }
+    break;
+  }
+}

@@ -1,0 +1,6 @@
+# $Id$
+#
+# Debian Stretch i686
+#
+# compilation & validation once a day
+25 2 * * * /home/fabien/32BIT/pips_check_compile --force --report --source /home/fabien/32BIT/pipsrc.sh coelho@cri.mines-paristech.fr /home/fabien/32BIT/prod /home/fabien/32BIT/validation

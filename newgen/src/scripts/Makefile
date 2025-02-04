@@ -1,0 +1,13 @@
+# $Id: Makefile 1297 2011-12-31 08:16:18Z coelho $
+
+INSTALL_EXE = \
+	make_all_specs\
+	newgen
+
+INSTALL_UTL = \
+	test_newgen_type_translation.sh \
+	test_newgen_type_translation.pl \
+	tabulated_count.pl
+
+ROOT	= ../..
+include $(ROOT)/makes/main.mk

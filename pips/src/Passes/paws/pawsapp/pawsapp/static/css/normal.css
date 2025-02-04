@@ -1,0 +1,26 @@
+body {
+    padding-top: 60px;
+    padding-bottom: 40px;
+}
+
+.sidebar-nav {
+    padding: 9px 0;
+}
+
+.inp-hide {
+    height: 30px;
+    left: -90px;
+    opacity: 0;
+    position: absolute;
+    z-index: 2;
+}
+
+/* Main column */
+
+ol.linenums li span {
+    color: #333;
+}
+
+.ZOOM_IMAGE img {
+    max-width: none; /* for compatibility with Bootstrap */
+}

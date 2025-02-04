@@ -1,0 +1,54 @@
+#!/bin/bash
+#
+# $Id$
+#
+# minimum rc file for sh-compatible shells
+#
+
+root=/home/fabien/CLGTK
+clgtk=$HOME/clgtk
+
+# sudo apt-get install cmake
+# svn co http://llvm.org/svn/llvm-project/llvm/trunk llvm-trunk
+# pushd llvm-trunk/tools
+# svn co http://llvm.org/svn/llvm-project/cfe/trunk clang
+# svn co http://llvm.org/svn/llvm-project/compiler-rt/trunk compiler-rt
+# popd
+# mkdir llvm-build
+# cd llvm-build
+# cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX=$HOME/clgtk ../llvm-trunk
+# make -j 32
+# make -j 32 check-all
+# make install
+
+# in */makes/config.mk:
+#   PIPS_NO_GPIPS = 1
+#   PIPS_ENABLE_FORTRAN95 =
+#   COPT += -Werror -Wno-error=void-pointer-to-enum-cast
+#   CPPOPT += -DPIPS_WERROR_COMPILATION
+
+# default architecture
+export PIPS_ARCH=CLANG_x86_64_LL
+
+# use clang (llvm C compiler)
+export PIPS_CC="clang -std=c99"
+export PIPS_CPP="clang -std=c99 -E -C -ffreestanding"
+
+# subversion repositories
+# export NEWGEN_SVN=https://svn.cri.mines-paristech.fr/svn/newgen
+# export LINEAR_SVN=https://svn.cri.mines-paristech.fr/svn/linear
+# export PIPS_SVN=https://svn.cri.mines-paristech.fr/svn/pips
+
+# software roots
+# needed for polylib
+export EXTERN_ROOT=$root/prod/extern
+
+export PIPS_F77=gfortran
+export PIPS_F90=gfortran
+
+# fix path
+export PATH=$clgtk/bin:/usr/bin:/bin:$root/prod/pips/bin:$root/prod/pips/utils
+export LD_LIBRARY_PATH=$clgtk/lib:$EXTERN_ROOT/lib:$LD_LIBRARY_PATH
+
+# ignore these static inlined function
+export PIPS_IGNORE_FUNCTION_RX='!__bswap_'

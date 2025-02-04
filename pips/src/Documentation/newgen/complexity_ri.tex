@@ -1,0 +1,123 @@
+%%
+%% $Id: complexity_ri.tex 23065 2016-03-02 09:05:50Z coelho $
+%%
+%% Copyright 1989-2016 MINES ParisTech
+%%
+%% This file is part of PIPS.
+%%
+%% PIPS is free software: you can redistribute it and/or modify it
+%% under the terms of the GNU General Public License as published by
+%% the Free Software Foundation, either version 3 of the License, or
+%% any later version.
+%%
+%% PIPS is distributed in the hope that it will be useful, but WITHOUT ANY
+%% WARRANTY; without even the implied warranty of MERCHANTABILITY or
+%% FITNESS FOR A PARTICULAR PURPOSE.
+%%
+%% See the GNU General Public License for more details.
+%%
+%% You should have received a copy of the GNU General Public License
+%% along with PIPS.  If not, see <http://www.gnu.org/licenses/>.
+%%
+\documentclass[a4]{article}
+ 
+\usepackage[latin1]{inputenc}
+\usepackage{newgen_domain}
+\usepackage[backref,pagebackref]{hyperref}
+ 
+\begin{document}
+\section*{Data Structure for Complexity Models }
+\today
+ 
+\domain{Import statement from "ri.newgen"}
+{
+\paragraph{}
+(Avoids conflicts between number types and types defined by the RI)
+}
+\domain{External Ppolynome}
+{
+\paragraph{}
+The domain {\bf Ppolynome} is used to represent the complexities of
+the {\bf statement} as function of parameters, variables and indices
+of loops with lobal coverage.  A Ppolynome is a list of monomials,
+each monomial being constited of a floating coefficient and a Pvecteur
+representing the product of variables with their expopents.  }
+ 
+\domain{Complexity = eval:Ppolynome x varcount x rangecount x ifcount}
+{
+\paragraph{}
+In the course of the evaluation, a field {\bf complexity} is
+associated with each {\bf statement}. The sub-domain {\bf eval}
+contains a polynome Approching the complexity of the statement. The
+sub-domains {\bf varcount}, {\bf rangecount} and {\bf ifcount} give
+the information statistics concerning the mnner in which the
+evaluation of the complexity took place, therefore also of the
+complexity itself. They count and in so doing classify the different
+types of variables/loops/tests encountered in the course of the
+complexity's evaluation.  }
+ 
+\domain{Varcount = symbolic:int x guessed:int x bounded:int x unknown:int}
+{
+\begin{itemize}
+
+\item {\bf symbolic} = the number of variables which we would like to
+  see appear in symbolic form in the expression of the complexity
+  ("parameters" Fortran, loop indices, formal parameters of a
+  subroutine). This gives false resultats of thois type of variable is
+  modified in the course of execution.
+
+\item {\bf guessed} = the number of variables the values of which
+  which we have guessed thanks to semantic analysis.
+    
+\item {\bf bounded} = the number of variables for whih we have
+  determined a maximum or minimum thanks to semantic analysis.
+ 
+\item {\bf unknown} = the number of for which e have found no
+  information, and which the user has not asked to se displayed in the
+  complexity. These variables are all replaced by the pseudo-variable
+  UNKNOWN\_VARIABLE, which takes at the end of the evaluation a
+  default value.
+\end{itemize}
+}
+ 
+\domain{Rangecount = profiled:int x guessed:int x bounded:int x unknown:int}
+{
+\begin{itemize}
+
+\item {\bf profiled} = the number of loops for which the limits have
+  been measured by means of profiling.
+ 
+\item {\bf guessed} = the number of loops for which the limits were at
+  worst variable polynomes of type {\bf symbolic} or {\bf guessed}
+ 
+\item {\bf bounded} = the number of loops for which the min./max
+  limits were deterlined thanks to semantic analysis.
+ 
+\item {\bf unknown} = the number of loops for which the number of
+  loops could not be discovered. In consequence 0 after profiling
+  pass. All these numbers are replaced by the pseudo-variable:
+  UNKNOWN\_RANGE, which will be given a default value at the end.
+\end{itemize}
+}
+ 
+\domain{Ifcount = profiled:int x computed:int x halfhalf:int}
+{
+\begin{itemize}
+
+\item {\bf profiled} = the number of tests for which the probability
+  was messured by mens of profiling .
+ 
+\item {\bf computed} = the number of tests for which the probability
+  the probability was calculated. In particular in this case where the
+  boolean expression depends only on the indices of those loops whose
+  coverage global and whose {\bf range}s are of type {\bf guessed}.
+ 
+\item {\bf halfhalf} = the number of tests the probability of which
+  was determined to be equal to a $\frac{1}{2}$ by defaut.
+\end{itemize}
+ 
+}
+ 
+\end{document}
+ 
+

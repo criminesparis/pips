@@ -1,0 +1,40 @@
+# $Id: pipsrc.sh.AUTOC 23641 2021-03-07 07:27:24Z coelho $
+#
+# minimum rc file for sh-compatible shells
+#
+# prod/pips/makes/config.mk:
+#   PIPS_NO_GPIPS = 1
+#   PIPS_ENABLE_FORTRAN95 = 
+#
+
+# default architecture
+export PIPS_ARCH=LINUX_x86_64_LL
+
+# some workaround for gcc 4.8 and later, avoid "stdc-predef.h"
+unset PIPS_CC
+export PIPS_CPP="gcc -std=c99 -E -C -ffreestanding"
+
+# subversion repositories
+# export NEWGEN_SVN=https://svn.cri.mines-paristech.fr/svn/newgen
+# export LINEAR_SVN=https://svn.cri.mines-paristech.fr/svn/linear
+# export PIPS_SVN=https://svn.cri.mines-paristech.fr/svn/pips
+
+# software roots
+# is it needed?
+export EXTERN_ROOT=/home/fabien/AUTOC/prod/extern
+
+export PYTHON_VERSION=2.7
+export PIPS_F77=gfortran
+export PIPS_F90=gfortran
+#export PATH=/usr/local/bin:/usr/bin:/bin
+export PATH=/usr/bin:/bin
+#export LD_LIBRARY_PATH=/usr/local/lib64
+
+install=/home/fabien/AUTOC/install
+
+export PKG_CONFIG_PATH=$install/lib/pkgconfig
+export PYTHONPATH=$install/lib/python$PYTHON_VERSION/site-packages/pips
+
+# fix path
+PATH=$install/bin:$PATH
+export LD_LIBRARY_PATH=$install/lib:$install/lib/python$PYTHON_VERSION/site-packages/pips:$LD_LIBRARY_PATH

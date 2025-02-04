@@ -1,0 +1,406 @@
+/*
+
+  $Id$
+
+  Copyright 1989-2014 MINES ParisTech
+
+  This file is part of PIPS.
+
+  PIPS is free software: you can redistribute it and/or modify it
+  under the terms of the GNU General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  any later version.
+
+  PIPS is distributed in the hope that it will be useful, but WITHOUT ANY
+  WARRANTY; without even the implied warranty of MERCHANTABILITY or
+  FITNESS FOR A PARTICULAR PURPOSE.
+
+  See the GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License
+  along with PIPS.  If not, see <http://www.gnu.org/licenses/>.
+
+*/
+
+// do not compile unless required
+#include "phases.h"
+#if defined(BUILDER_LOOP_BOUND_MINIMIZATION_WITH_OUT_REGIONS) || \
+  defined(BUILDER_DEAD_CODE_ELIMINATION) // also used here...
+
+#ifdef HAVE_CONFIG_H
+    #include "pips_config.h"
+#endif
+
+/**
+ * Pass: LOOP_BOUND_MINIMIZATION_WITH_OUT_REGIONS
+ * Debug mode: LOOP_BOUND_MINIMIZATION_DEBUG_LEVEL
+ * Properties used:
+ *   - FLAG_LOOPS_DO_LOOPS_ONLY (not implemented with FALSE, can really be implemented?)
+ * Resource needed:
+ *   - preconditions
+ *   - out_regions
+ *
+ */
+
+#include <stdlib.h>
+#include <stdio.h>
+
+#include "genC.h"
+#include "linear.h"
+
+#include "misc.h"
+#include "pipsdbm.h"
+#include "properties.h"
+
+#include "ri.h"
+#include "ri-util.h"
+#include "prettyprint.h" // for debugging
+
+#include "effects.h"
+#include "effects-util.h"
+
+#include "semantics.h" // used
+#include "effects-generic.h" // used
+#include "effects-convex.h" // print_inout_regions
+
+#include "transformer.h" // print_any_transformer
+#include "conversion.h"  // constraints_to_loop_bound
+
+typedef struct ctx_lbm {
+  bool do_loop_only_p;
+} ctx_lbm_t;
+
+static void loop_bound_minimization(statement s, _UNUSED_ ctx_lbm_t ctx) {
+  pips_debug(1, "begin\n");
+  loop l = statement_loop(s);
+  entity index = loop_index(l);
+  range r = loop_range(l);
+  statement body = loop_body(l);
+
+  //precondition of the loop to determine the lower/upper bounds of the initial loop
+  // The precondition permit to not recompute the lower/upper bounds and build the sc
+  transformer body_prec =  load_statement_precondition(body);
+
+  //OUT regions of the loop body to find if the useful index are the same that the lower/upper bounds
+  list loutregion_body = load_statement_out_regions(body);
+
+  Psysteme loop_sc = predicate_system(transformer_relation(body_prec));
+  // loop_sc must already be normalized (else the transformer must also be disgusting)
+  //loop_sc = sc_safe_normalize(loop_sc);
+
+  ifdebug(2) {
+    pips_debug(2, "statement:\n");
+    print_statement(s);
+    pips_debug(2, "loutregion_body:\n");
+    print_inout_regions(loutregion_body);
+    pips_debug(2, "body_prec:\n");
+    print_any_transformer(body_prec);
+  }
+
+  // sc_useful represent the useful value for the index
+  // initialize it with the empty set
+  // then add foreach OUT regions, add the region of the index that can be use with union (convex_hull)
+  Pbase base_index = base_add_variable(BASE_NULLE, (Variable) index);
+  Psysteme sc_useful = sc_empty(base_copy(base_index));
+
+  //For each OUT Regions find the lower/upper index used
+  VOLATILE_FOREACH(EFFECT, reg, loutregion_body) {
+    //if anywhere effect, can say nothing
+    if (anywhere_effect_p(reg)) {
+      // sc_useful as the whole world, ie. with no constraint
+      sc_useful = sc_free(sc_useful);
+      sc_useful = sc_rn(base_copy(base_index));
+      break;
+    }
+
+    descriptor d = effect_descriptor(reg);
+    if (descriptor_none_p(d)) {
+      //Nothing to do
+      //This case can really happens?
+    }
+    else if (descriptor_convex_p(d)) {
+      Psysteme local_sc_useful = descriptor_convex(d);
+
+      ifdebug(3) {
+        pips_debug(3, "before projection local_sc_useful:\n");
+        sc_print(local_sc_useful, (get_variable_name_t) pips_region_user_name);
+        pips_debug(3, "Nb_eq %d , Nb_ineq %d, dimension %d\n",
+                   (local_sc_useful)->nb_eq, (local_sc_useful)->nb_ineq,
+                   (local_sc_useful)->dimension);
+      }
+
+      // remove the PHI variable
+      reference ref = effect_any_reference(reg);
+      list indices = reference_indices(ref);
+      VOLATILE_FOREACH(EXPRESSION, index, indices)
+      {
+        entity indexent = expression_to_entity(index);
+        CATCH(overflow_error) {
+          pips_user_warning("overflow_error: Not managed..., "
+                    "Need some normalization?\nDon't do any minimization");
+          sc_useful = sc_free(sc_useful);
+          sc_useful = sc_rn(base_copy(base_index));
+          break;
+        }
+        TRY {
+          ifdebug(3) {
+            print_entity_variable(indexent);
+            sc_print(local_sc_useful, (get_variable_name_t) pips_region_user_name);
+          }
+          sc_and_base_projection_along_variable_ofl_ctrl(&local_sc_useful, indexent, FWD_OFL_CTRL);
+          UNCATCH(overflow_error);
+        }
+      }
+
+      ifdebug(3) {
+        pips_debug(3, "after projection local_sc_useful:\n");
+        sc_print(local_sc_useful, (get_variable_name_t) pips_region_user_name);
+        pips_debug(3, "Nb_eq %d , Nb_ineq %d, dimension %d\n",
+                   (local_sc_useful)->nb_eq, (local_sc_useful)->nb_ineq,
+                   (local_sc_useful)->dimension);
+      }
+
+      // Union of local_sc_useful and sc_useful
+      Psysteme temp = sc_useful;        //for memory leak
+      sc_useful = sc_cute_convex_hull(temp, local_sc_useful);
+      temp = sc_free(temp);
+    }
+    else if (descriptor_convexunion_p(d)) {
+      // Really occur?
+      pips_user_warning("Not done yet...\n");
+    }
+    else {
+      pips_internal_error("This case never occurs\n descriptor = %d\n",
+                          descriptor_tag(d));
+    }
+  }
+  ifdebug(2) {
+    pips_debug(2, "Union sc_useful:\n");
+    sc_print(sc_useful, (get_variable_name_t) pips_region_user_name);
+    pips_debug(2, "Nb_eq %d , Nb_ineq %d, dimension %d\n", (sc_useful)->nb_eq, (sc_useful)->nb_ineq, (sc_useful)->dimension);
+
+    pips_debug(2, "loop_sc:\n");
+    sc_print(loop_sc, (get_variable_name_t) pips_region_user_name);
+    pips_debug(2, "Nb_eq %d , Nb_ineq %d, dimension %d\n", (loop_sc)->nb_eq, (loop_sc)->nb_ineq, (loop_sc)->dimension);
+  }
+
+  //Intersection of sc_useful with loop_sc to be sure that will not add iteration,
+  // it's made with an append follow by a feasibility to check that the sc is correct
+  if (sc_empty_p(sc_useful) || sc_rn_p(sc_useful)) {
+    if (sc_empty_p(sc_useful)) {
+      pips_user_warning("Do we really enter the loop? Isn't an unreachable loop?\n"
+          "lower=%s, upper=%s, inc=%s\n",
+          expression_to_string(range_lower(r)), expression_to_string(range_upper(r)), expression_to_string(range_increment(r)) );
+      ifdebug(3)
+        print_statement(s);
+    }
+    sc_useful = sc_free(sc_useful);
+    sc_useful = loop_sc;
+  }
+  else {
+    bool feasible = true;
+    sc_useful = sc_safe_append(sc_safe_normalize(sc_useful), loop_sc);
+    sc_useful = sc_safe_normalize(sc_useful);
+
+    ifdebug(3) {
+      pips_debug(3, "after sc_safe_append and normalization of sc_useful:\n");
+      sc_print(sc_useful, (get_variable_name_t) pips_region_user_name);
+      pips_debug(3, "Nb_eq %d , Nb_ineq %d, dimension %d\n", (sc_useful)->nb_eq, (sc_useful)->nb_ineq, (sc_useful)->dimension);
+    }
+
+    CATCH(overflow_error)
+    {
+      pips_user_warning("overflow error, do nothing for loop bound.\n");
+      sc_useful = sc_free(sc_useful);
+      sc_useful = loop_sc;
+      feasible = true;
+    }
+    TRY
+    {
+      feasible = sc_integer_feasibility_ofl_ctrl(sc_useful,
+          FWD_OFL_CTRL, true);
+      UNCATCH(overflow_error);
+    }
+
+    // This case normally never occur, the intersection must always be feasible
+    if (!feasible) {
+      pips_user_warning("intersection NULL, this case never happen? \n");
+      ifdebug(1) {
+        pips_debug(1, "unfeasibility sc_useful:\n");
+        sc_print(sc_useful, (get_variable_name_t) pips_region_user_name);
+        pips_debug(1, "Nb_eq %d , Nb_ineq %d, dimension %d\n", (sc_useful)->nb_eq, (sc_useful)->nb_ineq, (sc_useful)->dimension);
+
+        pips_debug(1, "unfeasibility loop_sc:\n");
+        sc_print(loop_sc, (get_variable_name_t) pips_region_user_name);
+        pips_debug(1, "Nb_eq %d , Nb_ineq %d, dimension %d\n", (loop_sc)->nb_eq, (loop_sc)->nb_ineq, (loop_sc)->dimension);
+      }
+      sc_useful = sc_free(sc_useful);
+      sc_useful = loop_sc;
+    }
+
+  }
+  ifdebug(2) {
+    pips_debug(2, "after check feasibility sc_useful:\n");
+    sc_print(sc_useful, (get_variable_name_t) pips_region_user_name);
+    pips_debug(2, "Nb_eq %d , Nb_ineq %d, dimension %d\n", (sc_useful)->nb_eq, (sc_useful)->nb_ineq, (sc_useful)->dimension);
+  }
+
+  //Try to improve the loop bounds
+  //if sc_useful == loop_sc, nothing to do to improve loop bound
+  if (sc_useful != loop_sc && !sc_equal_p(sc_useful, loop_sc)) {
+    //Make a row_echelon to only keep constraint for index
+    //(It's may have other way to do that)
+    pips_debug(3, "sc_useful != loop_sc\n");
+    Psysteme condition = SC_UNDEFINED,
+        enumeration = SC_UNDEFINED;
+
+    pips_debug(5, "algorithm_row_echelon_generic start\n");
+    algorithm_row_echelon(sc_useful, base_index,
+        &condition, &enumeration);
+    pips_debug(5, "algorithm_row_echelon_generic end\n");
+
+    ifdebug(5) {
+      pips_debug(5, "result of algorithm_row_echelon_generic:\n");
+      pips_debug(5, "base_index:\n");
+      base_fprint(stdout, base_index, (get_variable_name_t) pips_region_user_name);
+
+      pips_debug(5, "sc_useful:\n");
+      sc_print(sc_useful, (get_variable_name_t) pips_region_user_name);
+      pips_debug(5, "Nb_eq %d , Nb_ineq %d, dimension %d\n", (sc_useful)->nb_eq, (sc_useful)->nb_ineq, (sc_useful)->dimension);
+
+      pips_debug(5, "condition:\n");
+      sc_print(condition, (get_variable_name_t) pips_region_user_name);
+      pips_debug(5, "Nb_eq %d , Nb_ineq %d, dimension %d\n", (condition)->nb_eq, (condition)->nb_ineq, (condition)->dimension);
+
+      pips_debug(5, "enumeration:\n");
+      sc_print(enumeration, (get_variable_name_t) pips_region_user_name);
+      pips_debug(5, "Nb_eq %d , Nb_ineq %d, dimension %d\n", (enumeration)->nb_eq, (enumeration)->nb_ineq, (enumeration)->dimension);
+    }
+
+    //determine new lower/upper bound
+    // code inspire from systeme_to_loop_nest
+    Pcontrainte c, lower, upper;
+    Variable var = (Variable) index;
+    entity divide = entity_intrinsic(DIVIDE_OPERATOR_NAME);
+    sc_transform_eg_in_ineg(enumeration);  /* ??? could do a better job with = */
+    c = sc_inegalites(enumeration);
+    pips_assert("no equalities, now", sc_nbre_egalites(enumeration)==0);
+
+    constraints_for_bounds(var, &c, &lower, &upper);
+    sc_inegalites(enumeration) = c;
+
+    //new lower bound
+    if( !CONTRAINTE_UNDEFINED_P(lower) ) {
+      expression new_lower_exp =
+          constraints_to_loop_bound(lower, var, true, divide);
+      expression low = range_lower(r);        //for memory leak
+      range_lower(r) = new_lower_exp;
+      free_expression(low);
+      ifdebug(3) {
+        pips_debug(3, "new_lower_exp:\n");
+        print_expression(new_lower_exp);
+      }
+    }
+    //new upper bound
+    if( !CONTRAINTE_UNDEFINED_P(upper) ) {
+      expression new_upper_exp =
+          constraints_to_loop_bound(upper, var, false, divide);
+      expression upper = range_upper(r);        //for memory leak
+      range_upper(r) = new_upper_exp;
+      free_expression(upper);
+      ifdebug(3) {
+        pips_debug(3, "new_upper_exp:\n");
+        print_expression(new_upper_exp);
+      }
+    }
+
+    //free the memory
+    lower = contraintes_free(lower);
+    upper = contraintes_free(upper);
+    sc_useful = sc_free(sc_useful);
+    enumeration = sc_free(enumeration);
+    condition = sc_free(condition);
+  }
+
+  pips_debug(1, "end\n");
+}
+
+static void statement_loop_bound_minimization(statement s, ctx_lbm_t *ctx) {
+  instruction i = statement_instruction(s);
+  if (instruction_loop_p(i)) {
+    loop_bound_minimization(s, *ctx);
+  }
+  else if (!ctx->do_loop_only_p &&
+      (instruction_forloop_p(i) || instruction_whileloop_p(i)) ) {
+    pips_user_warning("Not implemented. Can only treat DO loop kind of loop.\n");
+  }
+}
+
+
+bool loop_bound_minimization_with_out_regions_on_statement(statement module_statement) {
+  bool good_result_p = true;
+
+  ctx_lbm_t ctx;
+  ctx.do_loop_only_p = get_bool_property("FLAG_LOOPS_DO_LOOPS_ONLY");
+
+  gen_context_recurse(module_statement, &ctx,
+      statement_domain, gen_true2, statement_loop_bound_minimization);
+
+  return good_result_p;
+}
+
+/**
+ * PIPS pass
+ */
+bool loop_bound_minimization_with_out_regions(const char* module_name) {
+  //entity module;
+  statement module_statement;
+  bool good_result_p = true;
+
+  debug_on("LOOP_BOUND_MINIMIZATION_DEBUG_LEVEL");
+  pips_debug(1, "begin\n");
+
+  //-- configure environment --//
+  set_current_module_entity(module_name_to_entity(module_name));
+  //module = get_current_module_entity();
+
+  set_current_module_statement( (statement)
+      db_get_memory_resource(DBR_CODE, module_name, true) );
+  module_statement = get_current_module_statement();
+
+  pips_assert("Statement should be OK before...",
+      statement_consistent_p(module_statement));
+
+  set_ordering_to_statement(module_statement);
+
+
+  //-- get dependencies --//
+  set_out_effects((statement_effects)
+      db_get_memory_resource(DBR_OUT_REGIONS, module_name, true));
+  set_precondition_map( (statement_mapping)
+      db_get_memory_resource(DBR_PRECONDITIONS, module_name, true) );
+
+
+  //-- Make the job -- //
+  good_result_p = loop_bound_minimization_with_out_regions_on_statement(module_statement);
+
+  pips_assert("Statement should be OK after...",
+      statement_consistent_p(module_statement));
+
+
+  //-- Save modified code to database --//
+  DB_PUT_MEMORY_RESOURCE(DBR_CODE, strdup(module_name), module_statement);
+
+  reset_ordering_to_statement();
+  reset_out_effects();
+  reset_current_module_statement();
+  reset_current_module_entity();
+  reset_precondition_map();
+
+  pips_debug(1, "end\n");
+  debug_off();
+
+  return (good_result_p);
+}
+
+#endif // BUILDER_LOOP_BOUND_MINIMIZATION_WITH_OUT_REGIONS && others...

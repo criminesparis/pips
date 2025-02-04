@@ -1,0 +1,40 @@
+# $Id$
+#
+# minimum rc file for sh-compatible shells
+#
+# makes/config.mk:
+#  PIPS_NO_WPIPS = 1
+#  PIPS_NO_GPIPS = 1
+
+root=/home/fabien/PAUCK
+
+# default architecture
+export PIPS_ARCH=LINUX_x86_64_LL
+
+unset PIPS_CC
+# some workaround for gcc 4.8
+# avoid "stdc-predef.h"
+export PIPS_CPP="gcc -std=c99 -E -C -ffreestanding"
+
+# subversion repositories
+# export NEWGEN_SVN=https://svn.cri.mines-paristech.fr/svn/newgen
+# export LINEAR_SVN=https://svn.cri.mines-paristech.fr/svn/linear
+# export PIPS_SVN=https://svn.cri.mines-paristech.fr/svn/pips
+
+# software roots
+# needed for polylib
+export EXTERN_ROOT=$root/prod/extern
+
+# Fortran compiler
+export PIPS_F77=gfortran
+export PIPS_F90=gfortran
+
+# faster check validation
+export PIPS_CHECK_C=N
+export PIPS_CHECK_FORTRAN=N
+
+# fix path
+export PATH=/usr/bin:/bin:$root/prod/pips/bin:$root/prod/pips/utils
+
+# ignore these static inlined function
+export PIPS_IGNORE_FUNCTION_RX='!__bswap_'

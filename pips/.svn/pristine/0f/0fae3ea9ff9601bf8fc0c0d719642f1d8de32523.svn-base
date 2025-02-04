@@ -1,0 +1,91 @@
+# $Id$
+#
+# Copyright 1989-2016 MINES ParisTech
+#
+# This file is part of PIPS.
+#
+# PIPS is free software: you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# any later version.
+#
+# PIPS is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.
+#
+# See the GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with PIPS.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+TARGET	= tpips2pyps
+YOPT	= -v -d
+INC_CFILES	= $(TARGET).c
+OTHER_CFILES	= main_tpips.c
+DERIVED_HEADERS	= tp_yacc.h
+DERIVED_CFILES	= tp_yacc.c tp_lex.c
+DERIVED_FILES	= y.output loop_phases.h tpips.h
+
+LIB_CFILES	= $(INC_CFILES) $(DERIVED_CFILES)
+INC_TARGET	= $(TARGET).h
+LIB_TARGET	= lib$(TARGET).a
+BIN_TARGET	= $(TARGET)
+
+#INSTALL_LIB = 	main_tpips.o
+
+# common stuff
+ROOT    = ../../..
+PROJECT = pips
+include $(ROOT)/makes/main.mk
+
+CFILES	= $(LIB_CFILES) $(OTHER_CFILES)
+
+# local stuff
+clean: local-clean
+
+local-clean:
+	$(RM) $(DERIVED_CFILES) $(DERIVED_HEADERS) $(DERIVED_FILES)
+
+$(ARCH)/$(TARGET): $(addprefix $(ARCH)/, $(CFILES:%.c=%.o))
+	$(LINK) $@  $(TPIPS_LDFLAGS) $(addprefix $(ARCH)/, $(CFILES:%.c=%.o))  \
+	  -Wl,--start-group $(addprefix -l,$(tpips.libs)) -Wl,--end-group
+
+# this may be missing when bootstrapping
+$(ARCH)/tp_yacc.o: tpips.h loop_phases.h
+
+# hack around...
+TPIPS.dir	= ../../Passes/tpips
+tpips.h:
+	$(MAKE) -C $(TPIPS.dir) tpips.h
+	ln -s $(TPIPS.dir)/tpips.h
+
+# hack around
+p2p_cmd	= ./pipsmakerc-extract-loop-phase.py \
+		../../Documentation/pipsmake/pipsmake-rc.tex \
+		../../Documentation/pipsmake/properties.rc \
+		../../Documentation/pipsmake/pipsdep.rc
+loop_phases.h:
+	$(p2p_cmd) > $@
+
+phase0: loop_phases.h
+
+# tpips parser
+# some fixes are needed for -Werror to work...
+YY2TP = sed \
+	-e '/int  *yyerrstatus;/ivolatile ' \
+	-e 's/^ *yytype_int16 \*yyss;/yytype_int16 * volatile yyss;/' \
+	-e 's/^ *yytype_int16 \*yyssp;/yytype_int16 * volatile yyssp;/' \
+	-e 's/^ *YYSTYPE \*yyvs;/YYSTYPE * volatile yyvs;/' \
+	-e 's/^ *YYSIZE_T yystacksize;/volatile YYSIZE_T yystacksize;/'
+
+tp_lex.c: tp_lex.l tp_yacc.h
+	$(SCAN) --prefix='tp_' $< | $(SCANFIX) > $@
+
+tp_yacc.c: tp_yacc.y
+	$(PARSE) --name-prefix='tp_' tp_yacc.y
+	$(YY2TP) y.tab.c > tp_yacc.c
+	$(YY2TP) y.tab.h > tp_yacc.h
+	$(RM) y.output y.tab.c y.tab.h
+
+tp_yacc.h: tp_yacc.c

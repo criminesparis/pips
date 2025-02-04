@@ -1,0 +1,72 @@
+/*
+
+  $Id$
+
+  Copyright 1989-2016 MINES ParisTech
+
+  This file is part of PIPS.
+
+  PIPS is free software: you can redistribute it and/or modify it
+  under the terms of the GNU General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  any later version.
+
+  PIPS is distributed in the hope that it will be useful, but WITHOUT ANY
+  WARRANTY; without even the implied warranty of MERCHANTABILITY or
+  FITNESS FOR A PARTICULAR PURPOSE.
+
+  See the GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License
+  along with PIPS.  If not, see <http://www.gnu.org/licenses/>.
+
+*/
+#ifdef HAVE_CONFIG_H
+    #include "pips_config.h"
+#endif
+#include <stdio.h>
+#include <stdarg.h>
+#include <string.h>
+
+#include "genC.h"
+
+extern void gpips_user_error_message(char *);
+extern void gpips_user_warning_message(char *);
+
+void
+gpips_user_error(const char * calling_function_name,
+                 const char * format,
+                 va_list * args)
+{
+  string_buffer eb = string_buffer_make(true);
+  string_buffer_printf(eb, "user error in %s: ", calling_function_name);
+
+  va_list acpy;
+  va_copy(acpy, *args);
+  string_buffer_printf_alist(eb, (const string) format, &acpy);
+  va_end(acpy);
+
+  string ebs = string_buffer_to_string(eb);
+  string_buffer_free(&eb);
+
+  gpips_user_error_message(ebs);
+}
+
+void
+gpips_user_warning(const char * calling_function_name,
+                   const char * format,
+                   va_list * args)
+{
+  string_buffer wb = string_buffer_make(true);
+  string_buffer_printf(wb, "user warning in %s: ", calling_function_name);
+
+  va_list acpy;
+  va_copy(acpy, *args);
+  string_buffer_printf_alist(wb, (const string) format, &acpy);
+  va_end(acpy);
+
+  string wbs = string_buffer_to_string(wb);
+  string_buffer_free(&wb);
+
+  gpips_user_warning_message(wbs);
+}

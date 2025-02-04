@@ -1,0 +1,47 @@
+# $Id: pipsrc.sh.PYPS2 23641 2021-03-07 07:27:24Z coelho $
+#
+# minimum rc file for sh-compatible shells
+#
+# makes/config.mk:
+#  COPT += -Werror -Wno-error=clobbered
+#  CPPOPT += -DPIPS_WERROR_COMPILATION
+#  ETAGS = etags
+#  PIPS_NO_WPIPS = 1
+#  PIPS_NO_GPIPS = 1
+#  PIPS_ENABLE_PYPS = 1
+#  PYTHON_CONFIG = python2-config
+#  PYTHON = python2
+
+prod=/home/fabien/PYPS2/prod
+
+# default architecture
+export PIPS_ARCH=LINUX_x86_64_LL
+
+unset PIPS_CC
+# avoid "stdc-predef.h"
+export PIPS_CPP="gcc -std=c99 -E -C -ffreestanding -U__GNUC__"
+
+# subversion repositories
+# export NEWGEN_SVN=https://svn.cri.mines-paristech.fr/svn/newgen
+# export LINEAR_SVN=https://svn.cri.mines-paristech.fr/svn/linear
+# export PIPS_SVN=https://svn.cri.mines-paristech.fr/svn/pips
+
+# software roots
+# needed for polylib
+export EXTERN_ROOT=$prod/extern
+
+# Fortran compiler
+export PIPS_F77=gfortran
+export PIPS_F90=gfortran
+
+# faster check validation
+export PIPS_CHECK_C=N
+export PIPS_CHECK_FORTRAN=N
+
+# fix path
+export PATH=/usr/bin:/bin:$prod/pips/bin:$prod/pips/utils
+export LD_LIBRARY_PATH="$prod"/pips/lib/LINUX_x86_64_LL:"$prod"/linear/lib/LINUX_x86_64_LL:"$prod"/newgen/lib/LINUX_x86_64_LL:"$prod"/extern/lib/LINUX_x86_64_LL:$LD_LIBRARY_PATH
+export PYTHONPATH="$prod"/pips/lib/python/2.7/pips:"$PYTHONPATH"
+
+# ignore these static inlined function
+export PIPS_IGNORE_FUNCTION_RX='!__bswap_'
