@@ -1,6 +1,4 @@
-#! /bin/sh
-#
-# $Id: arch.sh 1231 2016-03-02 08:16:46Z coelho $
+# $Id: LINUX_x86_64_LL.mk 1231 2016-03-02 08:16:46Z coelho $
 #
 # Copyright 1989-2016 MINES ParisTech
 #
@@ -21,25 +19,10 @@
 # along with PIPS.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-# define pips architecture
+include $(ROOT)/makes/no_wpips.mk
+include $(ROOT)/makes/no_jpips.mk
+#include $(ROOT)/makes/no_gpips.mk
 
-case `uname -s` in
-    Linux)
-      if [ `uname -m` = 'x86_64' ] ; then
-	echo "LINUX_x86_64_LL"
-      elif [ `uname -m` = 'ppc64' ] ; then
-	echo "LINUX_PPC_64_LL"
-      elif [ `uname -m` = 'aarch64' ] ; then
-	echo "LINUX_aarch64_LL"
-      else
-	echo "LINUXI86LL"
-      fi;;
-    SunOS)
-	echo "GNUSOL2LL" ;;
-    FreeBSD)
-	echo "FREEBSDLL" ;;
-    Darwin)
-	echo "MACOSX" ;;
-    *)
-	echo "DEFAULT" ;;
-esac
+include $(ROOT)/makes/GNULL.mk
+include $(ROOT)/makes/linux.mk
+include $(ROOT)/makes/aarch64.mk
